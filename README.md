@@ -21,7 +21,11 @@ bun run dev
 
 - **Text source** — swap out the default text with your own via the text source button (top right)
 - **Volume / Speed / Power** — sliders in the toolbar adjust how aggressively audio intensity maps to typing speed
-- **Settings** — screenshake, cursor position, text width
+- **Shake Threshold** — controls screenshake sensitivity; lower values trigger on quieter hits, higher values only on strong peaks (0–300, default 120)
+- **Settings** (gear icon):
+  - **Screenshake** — toggle on/off, then adjust intensity multiplier (0.5x–3x) when enabled
+  - **Text anchor** — cursor position (bottom or center)
+  - **Text width** — constrain text width (full, large, medium, small)
 
 ## Build
 

@@ -29,19 +29,23 @@ interface TypewriterProps {
   textSource?: string;
   screenshake?: boolean;
   screenshakeMultiplier?: number;
+  shakeThreshold?: number;
   cursorPosition?: 'bottom' | 'center';
   textWidth?: TextWidth;
 }
 
-export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, cursorPosition = 'bottom', textWidth = 'full' }, ref) => {
+export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, shakeThreshold = 120, cursorPosition = 'bottom', textWidth = 'full' }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+  const cursorRef = useRef<HTMLSpanElement>(null);
 
   const screenshakeRef = useRef(screenshake);
   const shakeMultRef = useRef(screenshakeMultiplier);
+  const shakeThreshRef = useRef(shakeThreshold);
   const cursorPosRef = useRef(cursorPosition);
   screenshakeRef.current = screenshake;
   shakeMultRef.current = screenshakeMultiplier;
+  shakeThreshRef.current = shakeThreshold;
   cursorPosRef.current = cursorPosition;
 
   const linesRef = useRef<string[]>(['']);
@@ -88,7 +92,7 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
         }
 
         fluxAvgRef.current = fluxAvgRef.current * 0.95 + flux * 0.05;
-        const threshold = fluxAvgRef.current * 2.5 + 120;
+        const threshold = fluxAvgRef.current * 2.5 + shakeThreshRef.current;
 
         if (flux > threshold) {
           const raw = (flux - threshold) / 150;
@@ -107,9 +111,6 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
       }
 
       if (intensity < SILENCE_THRESHOLD) {
-        if (wasIntenseRef.current && linesRef.current[linesRef.current.length - 1].length > 0) {
-          linesRef.current.push('');
-        }
         wasIntenseRef.current = false;
         return 0;
       }
@@ -136,6 +137,8 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
       }
 
       textEl.textContent = linesRef.current.join('\n');
+      // Re-append cursor so it stays at the end
+      if (cursorRef.current) textEl.appendChild(cursorRef.current);
       wasIntenseRef.current = true;
 
       container.scrollTop = container.scrollHeight;
@@ -151,8 +154,9 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
         ref={containerRef}
         className={styles.container}
       >
-        <span ref={textRef} className={styles.text} />
-        <span className={styles.cursor}>|</span>
+        <span ref={textRef} className={styles.text}>
+          <span ref={cursorRef} className={styles.cursor}>|</span>
+        </span>
         <div className={`${styles.spacer} ${cursorPosition === 'center' ? styles.spacerCenter : ''}`} />
       </div>
       <button className={styles.clearBtn} onClick={doReset} title="Clear output">

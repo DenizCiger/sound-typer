@@ -150,6 +150,21 @@ const IconGear = () => (
   </svg>
 );
 
+const IconShake = () => (
+  <svg
+    width="14"
+    height="14"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M2 12h4l3-8 4 16 3-8h6" />
+  </svg>
+);
+
 const IconBars = () => (
   <svg
     width="12"
@@ -193,6 +208,8 @@ interface Props {
   onSpeed: (v: number) => void;
   onLoadText: (file: File) => void;
   onRemoveText: () => void;
+  shakeThreshold: number;
+  onShakeThreshold: (v: number) => void;
   onToggleVisualizer: () => void;
   onOpenSettings: () => void;
 }
@@ -217,6 +234,8 @@ export function Controls({
   onSpeed,
   onLoadText,
   onRemoveText,
+  shakeThreshold,
+  onShakeThreshold,
   onToggleVisualizer,
   onOpenSettings,
 }: Props) {
@@ -232,6 +251,8 @@ export function Controls({
   const [powerValue, setPowerValue] = useState(powerExponent.toString());
   const [speedValue, setSpeedValue] = useState(speedMultiplier.toString());
   const [volumeValue, setVolumeValue] = useState(Math.round(volume * 100).toString());
+  const [editingShakeThreshold, setEditingShakeThreshold] = useState(false);
+  const [shakeThresholdValue, setShakeThresholdValue] = useState(shakeThreshold.toString());
 
   const handleAudioDrop = (e: React.DragEvent) => {
     e.preventDefault();
@@ -282,6 +303,12 @@ export function Controls({
     const val = parseFloat(s);
     if (!isNaN(val) && val > 0) onSpeed(val);
     setEditingSpeed(false);
+  };
+
+  const handleShakeThresholdChange = (newVal: string) => {
+    const val = parseFloat(newVal.trim());
+    if (!isNaN(val) && val >= 0) onShakeThreshold(val);
+    setEditingShakeThreshold(false);
   };
 
   const handleVolumeChange = (newVolume: string) => {
@@ -474,6 +501,44 @@ export function Controls({
             title="Click to edit"
           >
             {speedMultiplier}
+          </span>
+        )}
+      </div>
+
+      <div className={styles.sliderLabel}>
+        <IconShake />
+        <input
+          type="range"
+          min={0}
+          max={300}
+          step={10}
+          value={shakeThreshold}
+          onChange={(e) => onShakeThreshold(parseFloat(e.target.value))}
+        />
+        {editingShakeThreshold ? (
+          <input
+            type="text"
+            className={styles.editInput}
+            style={{ fontSize: 10, width: `${shakeThresholdValue.length || 1}ch` }}
+            value={shakeThresholdValue}
+            onChange={(e) => setShakeThresholdValue(e.target.value)}
+            onBlur={() => handleShakeThresholdChange(shakeThresholdValue)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleShakeThresholdChange(shakeThresholdValue);
+              if (e.key === "Escape") setEditingShakeThreshold(false);
+            }}
+            autoFocus
+          />
+        ) : (
+          <span
+            className={styles.sliderVal}
+            onClick={() => {
+              setShakeThresholdValue(shakeThreshold.toString());
+              setEditingShakeThreshold(true);
+            }}
+            title="Click to edit"
+          >
+            {shakeThreshold}
           </span>
         )}
       </div>

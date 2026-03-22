@@ -26,11 +26,11 @@ function loadPrefs() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw) as { volume: number; powerExponent: number; speedMultiplier: number };
+    return JSON.parse(raw) as { volume: number; powerExponent: number; speedMultiplier: number; shakeThreshold?: number };
   } catch { return null; }
 }
 
-function savePrefs(prefs: { volume: number; powerExponent: number; speedMultiplier: number }) {
+function savePrefs(prefs: { volume: number; powerExponent: number; speedMultiplier: number; shakeThreshold: number }) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(prefs));
 }
 
@@ -58,6 +58,7 @@ export default function App() {
   const [volume, setVolumeState] = useState(prefs?.volume ?? 0.1);
   const [powerExponent, setPowerExponentState] = useState(prefs?.powerExponent ?? 4.5);
   const [speedMultiplier, setSpeedMultiplierState] = useState(prefs?.speedMultiplier ?? 2.5);
+  const [shakeThreshold, setShakeThresholdState] = useState(prefs?.shakeThreshold ?? 120);
   const [cps, setCps] = useState(0);
   const [intensity, setIntensity] = useState(0);
   const [playbackPos, setPlaybackPos] = useState(0);
@@ -78,8 +79,8 @@ export default function App() {
   const lastIntensityRef = useRef(0);
 
   useEffect(() => {
-    savePrefs({ volume, powerExponent, speedMultiplier });
-  }, [volume, powerExponent, speedMultiplier]);
+    savePrefs({ volume, powerExponent, speedMultiplier, shakeThreshold });
+  }, [volume, powerExponent, speedMultiplier, shakeThreshold]);
 
   const handleEnded = useCallback(() => {
     setIsPlaying(false);
@@ -125,6 +126,7 @@ export default function App() {
 
   const handlePower = useCallback((v: number) => setPowerExponentState(v), []);
   const handleSpeed = useCallback((v: number) => setSpeedMultiplierState(v), []);
+  const handleShakeThreshold = useCallback((v: number) => setShakeThresholdState(v), []);
 
   const handleTextFile = useCallback(async (file: File) => {
     const text = await file.text();
@@ -181,11 +183,13 @@ export default function App() {
         onSpeed={handleSpeed}
         onLoadText={handleTextFile}
         onRemoveText={handleRemoveTextSource}
+        shakeThreshold={shakeThreshold}
+        onShakeThreshold={handleShakeThreshold}
         onToggleVisualizer={() => setShowVisualizer(!showVisualizer)}
         onOpenSettings={() => setShowSettings(true)}
       />
       {showVisualizer && <Visualizer dataArrayRef={engine.dataArray} isPlaying={isPlaying} />}
-      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} screenshakeMultiplier={settings.screenshakeMultiplier} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} />
+      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} screenshakeMultiplier={settings.screenshakeMultiplier} shakeThreshold={shakeThreshold} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} />
       {showSettings && <Settings settings={settings} onChange={handleSettingsChange} onClose={() => setShowSettings(false)} />}
     </div>
   );
