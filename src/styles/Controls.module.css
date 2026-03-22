@@ -1,31 +1,61 @@
-.controls {
+.bar {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
+  gap: 8px;
+  padding: 0 12px;
+  height: 48px;
   background: var(--bg-light);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
-.iconBtn {
+.playIcon {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  color: var(--text-muted);
+  cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  padding: 5px 12px;
-  cursor: pointer;
-  border-radius: 6px;
-  transition: background 150ms ease, border-color 150ms ease;
+  justify-content: center;
+  transition: color 150ms ease;
+  line-height: 1;
+  flex-shrink: 0;
 }
 
-.iconBtn:hover {
-  background: var(--bg-hover);
-  border-color: rgba(255, 255, 255, 0.16);
+.playIcon:hover {
+  color: var(--text);
+}
+
+.time {
+  font-size: 11px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 30px;
+}
+
+.seekSlider {
+  width: 120px;
+  flex-shrink: 0;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 3px;
+  background: #3f3f46;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.seekSlider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 11px;
+  height: 11px;
+  background: #fafafa;
+  border-radius: 50%;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
 }
 
 .divider {
@@ -39,15 +69,15 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
   color: var(--text-muted);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .sliderLabel input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
-  width: 70px;
+  width: 60px;
   height: 3px;
   background: #3f3f46;
   border-radius: 2px;
@@ -57,8 +87,8 @@
 
 .sliderLabel input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   background: #fafafa;
   border-radius: 50%;
   cursor: pointer;
@@ -66,24 +96,48 @@
 }
 
 .sliderVal {
-  color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  min-width: 22px;
+  color: var(--text-muted);
+  min-width: 20px;
 }
 
 .stat {
-  color: var(--text-muted);
-  font-size: 11px;
+  font-size: 10px;
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  min-width: 160px;
+  color: var(--text-muted);
+  flex-shrink: 0;
 }
 
 .trackName {
-  color: var(--text-muted);
   font-size: 12px;
-  margin-left: auto;
+  color: var(--text-muted);
+  flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: right;
+}
+
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  line-height: 1;
+}
+
+.iconBtn:hover {
+  background: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
 }

@@ -4,10 +4,13 @@ export interface AudioEngine {
   load: (file: File) => Promise<void>;
   play: () => void;
   pause: () => void;
+  seek: (seconds: number) => void;
   setVolume: (v: number) => void;
+  getPosition: () => number;
   analyser: React.RefObject<AnalyserNode | null>;
   dataArray: React.RefObject<Uint8Array | null>;
-  isReady: React.RefObject<boolean>;
+  pauseOffset: React.RefObject<number>;
+  duration: React.RefObject<number>;
 }
 
 export function useAudioEngine(onEnded: () => void): AudioEngine {
@@ -19,9 +22,15 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
   const dataArrayRef = useRef<Uint8Array | null>(null);
   const pauseOffsetRef = useRef(0);
   const playStartTimeRef = useRef(0);
-  const isReadyRef = useRef(false);
+  const isPlayingRef = useRef(false);
 
   const load = useCallback(async (file: File) => {
+    // Tear down existing context if any
+    if (sourceRef.current) {
+      sourceRef.current = null;
+      try { audioCtxRef.current?.close(); } catch (_) {}
+    }
+
     const ctx = new AudioContext();
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
@@ -38,58 +47,97 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
     dataArrayRef.current = dataArray;
     audioBufferRef.current = audioBuffer;
     pauseOffsetRef.current = 0;
-    isReadyRef.current = true;
+    isPlayingRef.current = false;
   }, []);
 
-  const play = useCallback(() => {
+  const startSource = useCallback((offset: number) => {
     const ctx = audioCtxRef.current;
     const analyser = analyserRef.current;
     const gainNode = gainNodeRef.current;
     const audioBuffer = audioBufferRef.current;
     if (!ctx || !analyser || !gainNode || !audioBuffer) return;
 
-    ctx.resume();
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(analyser);
     analyser.connect(gainNode);
     gainNode.connect(ctx.destination);
-    source.start(0, pauseOffsetRef.current);
+    source.start(0, offset);
     playStartTimeRef.current = ctx.currentTime;
     source.onended = () => {
-      // Only trigger if we didn't manually stop (pause sets isReady before stop)
       if (sourceRef.current === source) {
         pauseOffsetRef.current = 0;
+        isPlayingRef.current = false;
         onEnded();
       }
     };
     sourceRef.current = source;
   }, [onEnded]);
 
-  const pause = useCallback(() => {
+  const stopSource = useCallback(() => {
     const ctx = audioCtxRef.current;
     const source = sourceRef.current;
     const audioBuffer = audioBufferRef.current;
-    if (!ctx || !source || !audioBuffer) return;
+    if (!source) return;
 
-    const elapsed = ctx.currentTime - playStartTimeRef.current;
-    pauseOffsetRef.current = Math.min(pauseOffsetRef.current + elapsed, audioBuffer.duration);
-    sourceRef.current = null; // prevent onended from firing
+    const elapsed = (ctx?.currentTime ?? 0) - playStartTimeRef.current;
+    pauseOffsetRef.current = Math.min(
+      pauseOffsetRef.current + elapsed,
+      audioBuffer?.duration ?? 0
+    );
+    sourceRef.current = null;
     try { source.stop(); } catch (_) {}
     source.disconnect();
   }, []);
+
+  const play = useCallback(() => {
+    audioCtxRef.current?.resume();
+    startSource(pauseOffsetRef.current);
+    isPlayingRef.current = true;
+  }, [startSource]);
+
+  const pause = useCallback(() => {
+    stopSource();
+    isPlayingRef.current = false;
+  }, [stopSource]);
+
+  const seek = useCallback((seconds: number) => {
+    pauseOffsetRef.current = seconds;
+    if (isPlayingRef.current) {
+      stopSource();
+      startSource(seconds);
+    }
+  }, [stopSource, startSource]);
 
   const setVolume = useCallback((v: number) => {
     if (gainNodeRef.current) gainNodeRef.current.gain.value = v;
   }, []);
 
+  const getPosition = useCallback(() => {
+    if (!isPlayingRef.current) return pauseOffsetRef.current;
+    const elapsed = (audioCtxRef.current?.currentTime ?? 0) - playStartTimeRef.current;
+    return pauseOffsetRef.current + elapsed;
+  }, []);
+
+  const durationRef = useRef(0);
+  // Keep duration in sync via a getter-like ref
+  const durationProxy = new Proxy(durationRef, {
+    get(target, prop) {
+      if (prop === 'current') return audioBufferRef.current?.duration ?? 0;
+      return (target as any)[prop];
+    }
+  });
+
   return {
     load,
     play,
     pause,
+    seek,
     setVolume,
+    getPosition,
     analyser: analyserRef,
     dataArray: dataArrayRef,
-    isReady: isReadyRef,
+    pauseOffset: pauseOffsetRef,
+    duration: durationProxy as React.RefObject<number>,
   };
 }

@@ -1,3 +1,11 @@
+.outer {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 .container {
   flex: 1;
   background: var(--bg-light);
@@ -32,4 +40,32 @@
   color: var(--accent);
   text-shadow: 0 0 8px var(--accent-glow);
   transition: color 150ms ease;
+}
+
+.clearBtn {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+  opacity: 0;
+}
+
+.outer:hover .clearBtn {
+  opacity: 1;
+}
+
+.clearBtn:hover {
+  background: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.16);
+  color: var(--text);
 }

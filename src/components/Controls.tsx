@@ -1,22 +1,24 @@
+import { useRef } from 'react';
 import styles from '../styles/Controls.module.css';
 
 const IconPlay = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+  <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
     <polygon points="2,1 11,6 2,11" />
   </svg>
 );
 
 const IconPause = () => (
-  <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+  <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
     <rect x="2" y="1" width="3" height="10" rx="1" />
     <rect x="7" y="1" width="3" height="10" rx="1" />
   </svg>
 );
 
-const IconReset = () => (
-  <svg width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M2 6.5a4.5 4.5 0 1 1 1.2 3" />
-    <polyline points="2,3.5 2,6.5 5,6.5" />
+const IconLoad = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+    <polyline points="17 8 12 3 7 8" />
+    <line x1="12" y1="3" x2="12" y2="15" />
   </svg>
 );
 
@@ -43,38 +45,60 @@ const IconSpeed = () => (
   </svg>
 );
 
+function formatTime(s: number) {
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return `${m}:${sec.toString().padStart(2, '0')}`;
+}
+
 interface Props {
   isPlaying: boolean;
   trackName: string;
+  playbackPos: number;
+  duration: number;
   volume: number;
   powerExponent: number;
   speedMultiplier: number;
   cps: number;
   intensity: number;
   onTogglePlay: () => void;
-  onReset: () => void;
+  onSeek: (s: number) => void;
+  onLoad: (file: File) => void;
   onVolume: (v: number) => void;
   onPower: (v: number) => void;
   onSpeed: (v: number) => void;
 }
 
 export function Controls({
-  isPlaying, trackName, volume, powerExponent, speedMultiplier,
-  cps, intensity, onTogglePlay, onReset, onVolume, onPower, onSpeed,
+  isPlaying, trackName, playbackPos, duration,
+  volume, powerExponent, speedMultiplier,
+  cps, intensity, onTogglePlay, onSeek, onLoad, onVolume, onPower, onSpeed,
 }: Props) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
-    <div className={styles.controls}>
-      <button onClick={onTogglePlay} className={styles.iconBtn}>
+    <div className={styles.bar}>
+      {/* Play/pause */}
+      <button onClick={onTogglePlay} className={styles.playIcon} aria-label={isPlaying ? 'Pause' : 'Play'}>
         {isPlaying ? <IconPause /> : <IconPlay />}
-        {isPlaying ? 'Pause' : 'Play'}
       </button>
-      <button onClick={onReset} className={styles.iconBtn}>
-        <IconReset />
-        Reset
-      </button>
+
+      {/* Seek */}
+      <span className={styles.time}>{formatTime(playbackPos)}</span>
+      <input
+        type="range"
+        className={styles.seekSlider}
+        min={0}
+        max={duration || 1}
+        step={0.1}
+        value={playbackPos}
+        onChange={(e) => onSeek(parseFloat(e.target.value))}
+      />
+      <span className={styles.time}>{formatTime(duration)}</span>
 
       <div className={styles.divider} />
 
+      {/* Settings sliders */}
       <label className={styles.sliderLabel}>
         <IconVolume />
         <input type="range" min={0} max={1} step={0.01} value={volume}
@@ -97,8 +121,19 @@ export function Controls({
 
       <div className={styles.divider} />
 
-      <span className={styles.stat}>{cps} chars/s &nbsp; {intensity.toFixed(3)}</span>
+      <span className={styles.stat}>{cps} cps &nbsp; {intensity.toFixed(3)}</span>
       <span className={styles.trackName}>{trackName}</span>
+
+      <button onClick={() => fileInputRef.current?.click()} className={styles.iconBtn} title="Load song">
+        <IconLoad />
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="audio/*"
+        style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) { onLoad(f); e.target.value = ''; } }}
+      />
     </div>
   );
 }
