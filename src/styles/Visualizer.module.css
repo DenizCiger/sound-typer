@@ -5,3 +5,9 @@
   display: block;
   background: var(--bg);
 }
+
+@media (max-width: 767px) {
+  .canvas {
+    height: 20vh;
+  }
+}

@@ -25,3 +25,9 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+@media (max-width: 767px) {
+  body, #root {
+    height: 100dvh;
+  }
+}

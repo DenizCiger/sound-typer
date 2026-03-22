@@ -37,3 +37,10 @@
   font-size: 13px;
   color: var(--text-muted);
 }
+
+@media (max-width: 767px) {
+  .content {
+    padding: 40px 24px;
+    margin: 0 16px;
+  }
+}

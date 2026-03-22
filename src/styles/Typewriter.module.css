@@ -37,18 +37,17 @@
 }
 
 @keyframes shake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-2px); }
-  75% { transform: translateX(2px); }
+  0% { transform: translate(0, 0); }
+  15% { transform: translate(-1.5px, 0.5px); }
+  30% { transform: translate(1px, -0.5px); }
+  50% { transform: translate(-0.5px, 1px); }
+  70% { transform: translate(1.5px, -0.5px); }
+  85% { transform: translate(-1px, 0.5px); }
+  100% { transform: translate(0, 0); }
 }
 
 .intense {
-  animation: shake 150ms ease;
-}
-
-.intense .text {
-  color: var(--accent);
-  text-shadow: 0 0 8px var(--accent-glow);
+  animation: shake 200ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
 }
 
 .clearBtn {
@@ -77,4 +76,20 @@
   background: var(--bg-hover);
   border-color: rgba(255, 255, 255, 0.16);
   color: var(--text);
+}
+
+@media (max-width: 767px) {
+  .container {
+    padding: 16px;
+  }
+
+  .text {
+    font-size: 13px;
+  }
+
+  .clearBtn {
+    width: 44px;
+    height: 44px;
+    opacity: 1;
+  }
 }

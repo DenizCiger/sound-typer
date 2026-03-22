@@ -248,3 +248,83 @@
 .chipTrashBtn:hover {
   color: #ff6b6b;
 }
+
+@media (max-width: 767px) {
+  .bar {
+    height: auto;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    gap: 8px 10px;
+  }
+
+  .playIcon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .iconBtn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .chip {
+    height: 36px;
+    max-width: none;
+  }
+
+  .chipTrashBtn {
+    width: 36px;
+  }
+
+  .seekSlider {
+    width: auto;
+    flex: 1;
+    min-width: 80px;
+    height: 6px;
+  }
+
+  .seekSlider::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+  }
+
+  .seekSlider::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    background: #fafafa;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+  }
+
+  .sliderLabel input[type='range'] {
+    width: 80px;
+    height: 6px;
+  }
+
+  .sliderLabel input[type='range']::-webkit-slider-thumb {
+    width: 22px;
+    height: 22px;
+  }
+
+  .sliderLabel input[type='range']::-moz-range-thumb {
+    width: 22px;
+    height: 22px;
+    background: #fafafa;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+  }
+
+  .stat {
+    display: none;
+  }
+
+  .divider {
+    display: none;
+  }
+
+  .spacer {
+    display: none;
+  }
+}
