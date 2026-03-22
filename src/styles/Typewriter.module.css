@@ -10,9 +10,24 @@
   flex: 1;
   background: var(--bg-light);
   padding: 20px;
-  overflow: hidden;
+  overflow-y: scroll;
+  overflow-x: hidden;
   border-top: 1px solid var(--border);
   min-height: 0;
+  scrollbar-width: none;
+}
+
+.container::-webkit-scrollbar {
+  display: none;
+}
+
+.spacer {
+  height: 0;
+  transition: height 200ms ease;
+}
+
+.spacerCenter {
+  height: 50%;
 }
 
 .text {

@@ -134,6 +134,22 @@ const IconTextFile = () => (
   </svg>
 );
 
+const IconGear = () => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+  </svg>
+);
+
 const IconBars = () => (
   <svg
     width="12"
@@ -178,6 +194,7 @@ interface Props {
   onLoadText: (file: File) => void;
   onRemoveText: () => void;
   onToggleVisualizer: () => void;
+  onOpenSettings: () => void;
 }
 
 export function Controls({
@@ -201,6 +218,7 @@ export function Controls({
   onLoadText,
   onRemoveText,
   onToggleVisualizer,
+  onOpenSettings,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
@@ -509,6 +527,14 @@ export function Controls({
         title={showVisualizer ? "Hide visualizer" : "Show visualizer"}
       >
         <IconBars />
+      </button>
+
+      <button
+        onClick={onOpenSettings}
+        className={styles.iconBtn}
+        title="Settings"
+      >
+        <IconGear />
       </button>
 
       <input

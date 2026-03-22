@@ -1,0 +1,183 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  min-width: 280px;
+  max-width: 360px;
+  width: 90vw;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+}
+
+.row + .row {
+  border-top: 1px solid var(--border);
+}
+
+.label {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.toggle {
+  position: relative;
+  width: 36px;
+  height: 20px;
+  background: #3f3f46;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 150ms ease;
+  flex-shrink: 0;
+}
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #a1a1aa;
+  border-radius: 50%;
+  transition: transform 150ms ease, background 150ms ease;
+}
+
+.toggleOn {
+  background: #fafafa;
+}
+
+.toggleOn::after {
+  transform: translateX(16px);
+  background: #09090b;
+}
+
+.segmented {
+  display: flex;
+  background: #27272a;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.segBtn {
+  font-size: 12px;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.segBtn + .segBtn {
+  border-left: 1px solid var(--border);
+}
+
+.segBtnActive {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.rowStacked {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.rowStacked + .row,
+.row + .rowStacked,
+.rowStacked + .rowStacked {
+  border-top: 1px solid var(--border);
+}
+
+.timeline {
+  position: relative;
+  height: 32px;
+  margin: 0 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.timelineTrack {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #3f3f46;
+  border-radius: 1px;
+}
+
+.timelineStop {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.timelineThumb {
+  position: absolute;
+  top: 5px;
+  width: 14px;
+  height: 14px;
+  background: #fafafa;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  top: 6px;
+  z-index: 2;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+.timelineDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3f3f46;
+  transition: background 150ms ease;
+}
+
+.timelineStopActive .timelineDot {
+  background: #a1a1aa;
+}
+
+.timelineLabel {
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: color 150ms ease;
+}
+
+.timelineStopActive .timelineLabel {
+  color: var(--text);
+}

@@ -1,4 +1,5 @@
 import { useRef, useImperativeHandle, forwardRef } from 'react';
+import type { TextWidth } from './Settings';
 import { LOREM, SILENCE_THRESHOLD, INTENSE_THRESHOLD, MAX_VISIBLE_LINES } from '../constants';
 import styles from '../styles/Typewriter.module.css';
 
@@ -17,13 +18,28 @@ const IconClear = () => (
   </svg>
 );
 
+const WIDTH_MAP: Record<TextWidth, string | undefined> = {
+  full: undefined,
+  large: '80%',
+  medium: '60%',
+  small: '40%',
+};
+
 interface TypewriterProps {
   textSource?: string;
+  screenshake?: boolean;
+  cursorPosition?: 'bottom' | 'center';
+  textWidth?: TextWidth;
 }
 
-export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM }, ref) => {
+export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, cursorPosition = 'bottom', textWidth = 'full' }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
+
+  const screenshakeRef = useRef(screenshake);
+  const cursorPosRef = useRef(cursorPosition);
+  screenshakeRef.current = screenshake;
+  cursorPosRef.current = cursorPosition;
 
   const linesRef = useRef<string[]>(['']);
   const sourceIndexRef = useRef(0);
@@ -77,7 +93,7 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
 
       textEl.textContent = linesRef.current.join('\n');
 
-      if (intensity > INTENSE_THRESHOLD) {
+      if (screenshakeRef.current && intensity > INTENSE_THRESHOLD) {
         container.classList.add(styles.intense);
         wasIntenseRef.current = true;
       } else {
@@ -93,10 +109,14 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
   }));
 
   return (
-    <div className={styles.outer}>
-      <div ref={containerRef} className={styles.container}>
+    <div className={styles.outer} style={{ width: WIDTH_MAP[textWidth], margin: WIDTH_MAP[textWidth] ? '0 auto' : undefined }}>
+      <div
+        ref={containerRef}
+        className={styles.container}
+      >
         <span ref={textRef} className={styles.text} />
         <span className={styles.cursor}>|</span>
+        <div className={`${styles.spacer} ${cursorPosition === 'center' ? styles.spacerCenter : ''}`} />
       </div>
       <button className={styles.clearBtn} onClick={doReset} title="Clear output">
         <IconClear />

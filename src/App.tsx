@@ -3,13 +3,24 @@ import './styles/global.css';
 import { LOREM } from './constants';
 import { useAudioEngine } from './hooks/useAudioEngine';
 import { useAnimationLoop } from './hooks/useAnimationLoop';
-import { UploadZone } from './components/UploadZone';
 import { Controls } from './components/Controls';
 import { Visualizer } from './components/Visualizer';
 import { Typewriter, type TypewriterHandle } from './components/Typewriter';
+import { Settings, type SettingsState } from './components/Settings';
 
 const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
+const SETTINGS_KEY = 'sound-typer-settings';
+
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, cursorPosition: 'bottom', textWidth: 'full' };
+
+function loadSettings(): SettingsState {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_SETTINGS;
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+  } catch { return DEFAULT_SETTINGS; }
+}
 
 function loadPrefs() {
   try {
@@ -42,7 +53,6 @@ export default function App() {
   const prefs = loadPrefs();
   const savedTextSource = loadTextSource();
 
-  const [hasFile, setHasFile] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [trackName, setTrackName] = useState('');
   const [volume, setVolumeState] = useState(prefs?.volume ?? 0.1);
@@ -54,6 +64,13 @@ export default function App() {
   const [textSource, setTextSourceState] = useState<string | null>(savedTextSource);
   const [textSourceName, setTextSourceName] = useState<string | null>(savedTextSource ? 'Custom' : null);
   const [showVisualizer, setShowVisualizer] = useState(true);
+  const [settings, setSettings] = useState<SettingsState>(loadSettings);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const handleSettingsChange = useCallback((s: SettingsState) => {
+    setSettings(s);
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+  }, []);
 
   const typewriterRef = useRef<TypewriterHandle>(null);
   const charsThisSecondRef = useRef(0);
@@ -84,7 +101,6 @@ export default function App() {
     await engine.load(file);
     setTrackName(file.name);
     setPlaybackPos(0);
-    setHasFile(true);
   }, [engine, isPlaying]);
 
   const handleTogglePlay = useCallback(() => {
@@ -143,10 +159,6 @@ export default function App() {
 
   useAnimationLoop({ isPlaying, analyser: engine.analyser, dataArray: engine.dataArray, powerExponent, onFrame });
 
-  if (!hasFile) {
-    return <UploadZone onFile={handleFile} />;
-  }
-
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       <Controls
@@ -170,9 +182,11 @@ export default function App() {
         onLoadText={handleTextFile}
         onRemoveText={handleRemoveTextSource}
         onToggleVisualizer={() => setShowVisualizer(!showVisualizer)}
+        onOpenSettings={() => setShowSettings(true)}
       />
       {showVisualizer && <Visualizer dataArrayRef={engine.dataArray} isPlaying={isPlaying} />}
-      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} />
+      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} />
+      {showSettings && <Settings settings={settings} onChange={handleSettingsChange} onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
