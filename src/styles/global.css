@@ -1,0 +1,27 @@
+:root {
+  --accent: #e4e4e7;
+  --accent-glow: rgba(255, 255, 255, 0.15);
+  --bg: #09090b;
+  --bg-light: #18181b;
+  --bg-hover: #27272a;
+  --text: #fafafa;
+  --text-muted: #a1a1aa;
+  --border: rgba(255, 255, 255, 0.08);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  height: 100vh;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}

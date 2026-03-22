@@ -1,0 +1,39 @@
+.zone {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  cursor: pointer;
+}
+
+.content {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 60px 80px;
+  text-align: center;
+  transition: background 150ms ease, border-color 150ms ease;
+  background: var(--bg-light);
+}
+
+.content:hover, .dragging {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: var(--bg-hover);
+}
+
+.icon {
+  margin-bottom: 16px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: center;
+}
+
+.title {
+  font-size: 14px;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}

@@ -1,0 +1,35 @@
+.container {
+  flex: 1;
+  background: var(--bg-light);
+  padding: 20px;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  min-height: 0;
+}
+
+.text {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  display: inline;
+}
+
+.cursor {
+  font-size: 14px;
+  color: var(--text-muted);
+  animation: blink 1s step-end infinite;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+.intense .text {
+  color: var(--accent);
+  text-shadow: 0 0 8px var(--accent-glow);
+  transition: color 150ms ease;
+}
