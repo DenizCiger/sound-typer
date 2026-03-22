@@ -64,7 +64,7 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
     shakeDyRef.current = 0;
 
     if (textRef.current) textRef.current.textContent = '';
-    if (containerRef.current) containerRef.current.style.transform = '';
+    if (textRef.current) textRef.current.style.transform = '';
   };
 
   useImperativeHandle(ref, () => ({
@@ -99,11 +99,11 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
         }
       }
 
-      // Apply shake transform
+      // Apply shake transform to text
       if (Math.abs(shakeDxRef.current) > 0.5 || Math.abs(shakeDyRef.current) > 0.5) {
-        container.style.transform = `translate(${shakeDxRef.current}px, ${shakeDyRef.current}px)`;
+        textEl.style.transform = `translate(${shakeDxRef.current}px, ${shakeDyRef.current}px)`;
       } else {
-        container.style.transform = '';
+        textEl.style.transform = '';
       }
 
       if (intensity < SILENCE_THRESHOLD) {

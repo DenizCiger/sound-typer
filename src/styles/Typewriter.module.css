@@ -38,7 +38,7 @@
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-word;
-  display: inline;
+  display: inline-block;
 }
 
 .cursor {
