@@ -94,7 +94,11 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
       textEl.textContent = linesRef.current.join('\n');
 
       if (screenshakeRef.current && intensity > INTENSE_THRESHOLD) {
-        container.classList.add(styles.intense);
+        if (!wasIntenseRef.current) {
+          container.classList.remove(styles.intense);
+          void container.offsetWidth; // force reflow to restart animation
+          container.classList.add(styles.intense);
+        }
         wasIntenseRef.current = true;
       } else {
         container.classList.remove(styles.intense);
