@@ -49,7 +49,7 @@ export function Settings({ settings, onChange, onClose }: Props) {
     if (!track || !draggingRef.current) return;
     draggingRef.current = false;
     const rect = track.getBoundingClientRect();
-    const index = snapToNearest(clientX, rect);
+    snapToNearest(clientX, rect);
     setDragIndex(null);
     setDragPct(null);
   }, []);
