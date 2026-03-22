@@ -109,14 +109,8 @@
   flex-shrink: 0;
 }
 
-.trackName {
-  font-size: 12px;
-  color: var(--text-muted);
+.spacer {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-align: right;
 }
 
 .iconBtn {
@@ -140,4 +134,79 @@
   background: var(--bg-hover);
   border-color: rgba(255, 255, 255, 0.16);
   color: var(--text);
+}
+
+.chip {
+  display: flex;
+  align-items: center;
+  height: 26px;
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  max-width: 180px;
+}
+
+.chip:hover {
+  background: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.chipActive {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.chipButton {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 8px;
+  height: 100%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 150ms ease;
+  flex: 1;
+  min-width: 0;
+}
+
+.chipButton > span {
+  flex: 1;
+}
+
+.chip:hover .chipButton {
+  color: var(--text);
+}
+
+.chipActive .chipButton {
+  color: var(--text);
+}
+
+.chipName {
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipTrashBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-left: 1px solid var(--border);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  line-height: 1;
+}
+
+.chipTrashBtn:hover {
+  color: #ff6b6b;
 }

@@ -17,18 +17,22 @@ const IconClear = () => (
   </svg>
 );
 
-export const Typewriter = forwardRef<TypewriterHandle>((_, ref) => {
+interface TypewriterProps {
+  textSource?: string;
+}
+
+export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
 
   const linesRef = useRef<string[]>(['']);
-  const loremIndexRef = useRef(0);
+  const sourceIndexRef = useRef(0);
   const charAccumRef = useRef(0);
   const wasIntenseRef = useRef(false);
 
   const doReset = () => {
     linesRef.current = [''];
-    loremIndexRef.current = 0;
+    sourceIndexRef.current = 0;
     charAccumRef.current = 0;
     wasIntenseRef.current = false;
     if (textRef.current) textRef.current.textContent = '';
@@ -57,8 +61,8 @@ export const Typewriter = forwardRef<TypewriterHandle>((_, ref) => {
 
       let newChars = '';
       for (let i = 0; i < count; i++) {
-        const ch = LOREM[loremIndexRef.current % LOREM.length];
-        loremIndexRef.current++;
+        const ch = textSource[sourceIndexRef.current % textSource.length];
+        sourceIndexRef.current++;
         if (ch === '\n') {
           linesRef.current.push('');
         } else {

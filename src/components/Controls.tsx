@@ -14,8 +14,16 @@ const IconPause = () => (
   </svg>
 );
 
-const IconLoad = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+const IconMusic = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+  </svg>
+);
+
+const IconUpload = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
     <polyline points="17 8 12 3 7 8" />
     <line x1="12" y1="3" x2="12" y2="15" />
@@ -45,6 +53,25 @@ const IconSpeed = () => (
   </svg>
 );
 
+const IconTrash = () => (
+  <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="3 6 5 6 21 6" />
+    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    <path d="M10 11v6" />
+    <path d="M14 11v6" />
+    <path d="M9 6V4h6v2" />
+  </svg>
+);
+
+const IconTextFile = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10z" />
+    <polyline points="14 2 14 8 20 8" />
+    <line x1="8" y1="13" x2="16" y2="13" />
+    <line x1="8" y1="17" x2="12" y2="17" />
+  </svg>
+);
+
 function formatTime(s: number) {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
@@ -61,20 +88,24 @@ interface Props {
   speedMultiplier: number;
   cps: number;
   intensity: number;
+  textSourceName: string | null;
   onTogglePlay: () => void;
   onSeek: (s: number) => void;
   onLoad: (file: File) => void;
   onVolume: (v: number) => void;
   onPower: (v: number) => void;
   onSpeed: (v: number) => void;
+  onLoadText: (file: File) => void;
+  onRemoveText: () => void;
 }
 
 export function Controls({
   isPlaying, trackName, playbackPos, duration,
   volume, powerExponent, speedMultiplier,
-  cps, intensity, onTogglePlay, onSeek, onLoad, onVolume, onPower, onSpeed,
+  cps, intensity, textSourceName, onTogglePlay, onSeek, onLoad, onVolume, onPower, onSpeed, onLoadText, onRemoveText,
 }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className={styles.bar}>
@@ -122,17 +153,45 @@ export function Controls({
       <div className={styles.divider} />
 
       <span className={styles.stat}>{cps} cps &nbsp; {intensity.toFixed(3)}</span>
-      <span className={styles.trackName}>{trackName}</span>
 
-      <button onClick={() => fileInputRef.current?.click()} className={styles.iconBtn} title="Load song">
-        <IconLoad />
-      </button>
+      <div className={styles.spacer} />
+
+      <div className={styles.chip}>
+        <button onClick={() => fileInputRef.current?.click()} className={styles.chipButton} title="Load song">
+          <IconMusic />
+          <span className={styles.chipName}>{trackName}</span>
+          <IconUpload />
+        </button>
+      </div>
+
+      <div className={`${styles.chip} ${textSourceName ? styles.chipActive : ''}`}>
+        <button
+          onClick={() => textInputRef.current?.click()}
+          className={styles.chipButton}
+          title={textSourceName ? `Text source: ${textSourceName}` : 'Load text source'}
+        >
+          <IconTextFile />
+          <span className={styles.chipName}>{textSourceName ?? 'Lorem ipsum'}</span>
+          {!textSourceName && <IconUpload />}
+        </button>
+        {textSourceName && (
+          <button onClick={onRemoveText} className={styles.chipTrashBtn} title="Remove custom text source">
+            <IconTrash />
+          </button>
+        )}
+      </div>
       <input
         ref={fileInputRef}
         type="file"
         accept="audio/*"
         style={{ display: 'none' }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) { onLoad(f); e.target.value = ''; } }}
+      />
+      <input
+        ref={textInputRef}
+        type="file"
+        style={{ display: 'none' }}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) { onLoadText(f); e.target.value = ''; } }}
       />
     </div>
   );
