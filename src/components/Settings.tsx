@@ -5,6 +5,7 @@ export type TextWidth = 'full' | 'large' | 'medium' | 'small';
 
 export interface SettingsState {
   screenshake: boolean;
+  screenshakeMultiplier: number;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
 }
@@ -90,6 +91,25 @@ export function Settings({ settings, onChange, onClose }: Props) {
             onClick={() => onChange({ ...settings, screenshake: !settings.screenshake })}
           />
         </div>
+        {settings.screenshake && (
+          <div className={styles.row}>
+            <span className={styles.label}>Intensity</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input
+                type="range"
+                min="0.5"
+                max="3"
+                step="0.5"
+                value={settings.screenshakeMultiplier}
+                onChange={(e) => onChange({ ...settings, screenshakeMultiplier: parseFloat(e.target.value) })}
+                style={{ width: 80, accentColor: '#fafafa' }}
+              />
+              <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 28, textAlign: 'right' }}>
+                {settings.screenshakeMultiplier}x
+              </span>
+            </div>
+          </div>
+        )}
 
         <div className={styles.row}>
           <span className={styles.label}>Text anchor</span>

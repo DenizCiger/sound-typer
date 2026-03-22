@@ -12,7 +12,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, cursorPosition: 'bottom', textWidth: 'full' };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, cursorPosition: 'bottom', textWidth: 'full' };
 
 function loadSettings(): SettingsState {
   try {
@@ -139,11 +139,11 @@ export default function App() {
     saveTextSource(null);
   }, []);
 
-  const onFrame = useCallback((_data: Uint8Array, frameIntensity: number) => {
+  const onFrame = useCallback((_data: Uint8Array, frameIntensity: number, shakeData: Uint8Array | null) => {
     const canvas = document.querySelector('canvas') as HTMLCanvasElement;
     if (canvas && (canvas as any).__draw) (canvas as any).__draw();
 
-    const typed = typewriterRef.current?.feed(frameIntensity, speedMultiplier) ?? 0;
+    const typed = typewriterRef.current?.feed(frameIntensity, speedMultiplier, shakeData) ?? 0;
     charsThisSecondRef.current += typed;
 
     const now = performance.now();
@@ -157,7 +157,7 @@ export default function App() {
     lastIntensityRef.current = frameIntensity;
   }, [speedMultiplier, engine]);
 
-  useAnimationLoop({ isPlaying, analyser: engine.analyser, dataArray: engine.dataArray, powerExponent, onFrame });
+  useAnimationLoop({ isPlaying, analyser: engine.analyser, dataArray: engine.dataArray, shakeAnalyser: engine.shakeAnalyser, shakeDataArray: engine.shakeDataArray, powerExponent, onFrame });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
@@ -185,7 +185,7 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
       {showVisualizer && <Visualizer dataArrayRef={engine.dataArray} isPlaying={isPlaying} />}
-      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} />
+      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} screenshakeMultiplier={settings.screenshakeMultiplier} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} />
       {showSettings && <Settings settings={settings} onChange={handleSettingsChange} onClose={() => setShowSettings(false)} />}
     </div>
   );

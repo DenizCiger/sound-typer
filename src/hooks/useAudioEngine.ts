@@ -9,6 +9,8 @@ export interface AudioEngine {
   getPosition: () => number;
   analyser: React.RefObject<AnalyserNode | null>;
   dataArray: React.RefObject<Uint8Array | null>;
+  shakeAnalyser: React.RefObject<AnalyserNode | null>;
+  shakeDataArray: React.RefObject<Uint8Array | null>;
   pauseOffset: React.RefObject<number>;
   duration: React.RefObject<number>;
 }
@@ -16,6 +18,8 @@ export interface AudioEngine {
 export function useAudioEngine(onEnded: () => void): AudioEngine {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const shakeAnalyserRef = useRef<AnalyserNode | null>(null);
+  const shakeDataArrayRef = useRef<Uint8Array | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
@@ -35,6 +39,12 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
+
+    const shakeAnalyser = ctx.createAnalyser();
+    shakeAnalyser.fftSize = 512;
+    shakeAnalyser.smoothingTimeConstant = 0.3;
+    const shakeDataArray = new Uint8Array(shakeAnalyser.frequencyBinCount);
+
     const gainNode = ctx.createGain();
     gainNode.gain.value = 0.1;
 
@@ -43,6 +53,8 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
 
     audioCtxRef.current = ctx;
     analyserRef.current = analyser;
+    shakeAnalyserRef.current = shakeAnalyser;
+    shakeDataArrayRef.current = shakeDataArray;
     gainNodeRef.current = gainNode;
     dataArrayRef.current = dataArray;
     audioBufferRef.current = audioBuffer;
@@ -57,9 +69,11 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
     const audioBuffer = audioBufferRef.current;
     if (!ctx || !analyser || !gainNode || !audioBuffer) return;
 
+    const shakeAnalyser = shakeAnalyserRef.current;
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(analyser);
+    if (shakeAnalyser) source.connect(shakeAnalyser);
     analyser.connect(gainNode);
     gainNode.connect(ctx.destination);
     source.start(0, offset);
@@ -137,6 +151,8 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
     getPosition,
     analyser: analyserRef,
     dataArray: dataArrayRef,
+    shakeAnalyser: shakeAnalyserRef,
+    shakeDataArray: shakeDataArrayRef,
     pauseOffset: pauseOffsetRef,
     duration: durationProxy as React.RefObject<number>,
   };

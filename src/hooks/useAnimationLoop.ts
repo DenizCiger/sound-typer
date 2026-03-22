@@ -15,14 +15,18 @@ interface AnimationLoopOptions {
   isPlaying: boolean;
   analyser: React.RefObject<AnalyserNode | null>;
   dataArray: React.RefObject<Uint8Array | null>;
+  shakeAnalyser: React.RefObject<AnalyserNode | null>;
+  shakeDataArray: React.RefObject<Uint8Array | null>;
   powerExponent: number;
-  onFrame: (dataArray: Uint8Array<ArrayBuffer>, intensity: number) => void;
+  onFrame: (dataArray: Uint8Array<ArrayBuffer>, intensity: number, shakeData: Uint8Array<ArrayBuffer> | null) => void;
 }
 
 export function useAnimationLoop({
   isPlaying,
   analyser,
   dataArray,
+  shakeAnalyser,
+  shakeDataArray,
   powerExponent,
   onFrame,
 }: AnimationLoopOptions) {
@@ -46,12 +50,22 @@ export function useAnimationLoop({
         const buf = d as Uint8Array<ArrayBuffer>;
         a.getByteFrequencyData(buf);
         const intensity = computeIntensity(buf, powerRef.current);
-        onFrameRef.current(buf, intensity);
+
+        const sa = shakeAnalyser.current;
+        const sd = shakeDataArray.current;
+        let shakeBuf: Uint8Array<ArrayBuffer> | null = null;
+        if (sa && sd) {
+          const sbuf = sd as Uint8Array<ArrayBuffer>;
+          sa.getByteFrequencyData(sbuf);
+          shakeBuf = sbuf;
+        }
+
+        onFrameRef.current(buf, intensity, shakeBuf);
       }
       rafRef.current = requestAnimationFrame(tick);
     };
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [isPlaying, analyser, dataArray]);
+  }, [isPlaying, analyser, dataArray, shakeAnalyser, shakeDataArray]);
 }

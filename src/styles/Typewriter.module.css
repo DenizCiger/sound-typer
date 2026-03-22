@@ -51,20 +51,6 @@
   50% { opacity: 0; }
 }
 
-@keyframes shake {
-  0% { transform: translate(0, 0); }
-  15% { transform: translate(-1.5px, 0.5px); }
-  30% { transform: translate(1px, -0.5px); }
-  50% { transform: translate(-0.5px, 1px); }
-  70% { transform: translate(1.5px, -0.5px); }
-  85% { transform: translate(-1px, 0.5px); }
-  100% { transform: translate(0, 0); }
-}
-
-.intense {
-  animation: shake 200ms cubic-bezier(0.36, 0.07, 0.19, 0.97);
-}
-
 .clearBtn {
   position: absolute;
   bottom: 14px;
