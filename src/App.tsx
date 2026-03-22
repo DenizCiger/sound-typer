@@ -53,6 +53,7 @@ export default function App() {
   const [playbackPos, setPlaybackPos] = useState(0);
   const [textSource, setTextSourceState] = useState<string | null>(savedTextSource);
   const [textSourceName, setTextSourceName] = useState<string | null>(savedTextSource ? 'Custom' : null);
+  const [showVisualizer, setShowVisualizer] = useState(true);
 
   const typewriterRef = useRef<TypewriterHandle>(null);
   const charsThisSecondRef = useRef(0);
@@ -159,6 +160,7 @@ export default function App() {
         cps={cps}
         intensity={intensity}
         textSourceName={textSourceName}
+        showVisualizer={showVisualizer}
         onTogglePlay={handleTogglePlay}
         onSeek={handleSeek}
         onLoad={handleFile}
@@ -167,8 +169,9 @@ export default function App() {
         onSpeed={handleSpeed}
         onLoadText={handleTextFile}
         onRemoveText={handleRemoveTextSource}
+        onToggleVisualizer={() => setShowVisualizer(!showVisualizer)}
       />
-      <Visualizer dataArrayRef={engine.dataArray} isPlaying={isPlaying} />
+      {showVisualizer && <Visualizer dataArrayRef={engine.dataArray} isPlaying={isPlaying} />}
       <Typewriter ref={typewriterRef} textSource={textSource || LOREM} />
     </div>
   );

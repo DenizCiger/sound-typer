@@ -36,10 +36,19 @@
   50% { opacity: 0; }
 }
 
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+.intense {
+  animation: shake 150ms ease;
+}
+
 .intense .text {
   color: var(--accent);
   text-shadow: 0 0 8px var(--accent-glow);
-  transition: color 150ms ease;
 }
 
 .clearBtn {

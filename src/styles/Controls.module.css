@@ -28,12 +28,24 @@
   color: var(--text);
 }
 
-.time {
+.time,
+.timeStatic {
   font-size: 11px;
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
   color: var(--text-muted);
   flex-shrink: 0;
   min-width: 30px;
+  border-bottom: 1px solid transparent;
+}
+
+.time {
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.time:hover {
+  color: var(--text);
+  border-bottom-color: rgba(255, 255, 255, 0.2);
 }
 
 .seekSlider {
@@ -99,7 +111,28 @@
   font-size: 10px;
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
   color: var(--text-muted);
-  min-width: 20px;
+  cursor: pointer;
+  border-bottom: 1px solid transparent;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.sliderVal:hover {
+  color: var(--text);
+  border-bottom-color: rgba(255, 255, 255, 0.2);
+}
+
+.editInput {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0;
+  outline: none;
+}
+
+.editInput:focus {
+  border-bottom-color: rgba(255, 255, 255, 0.5);
 }
 
 .stat {
@@ -155,6 +188,11 @@
 
 .chipActive {
   border-color: rgba(255, 255, 255, 0.18);
+}
+
+.chipDragging {
+  background: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .chipButton {
