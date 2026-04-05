@@ -1,5 +1,5 @@
 import { useRef, useImperativeHandle, forwardRef } from 'react';
-import type { TextWidth } from './Settings';
+import type { TextWidth, WhitespaceMode } from './Settings';
 import { LOREM, SILENCE_THRESHOLD, MAX_VISIBLE_LINES } from '../constants';
 import styles from '../styles/Typewriter.module.css';
 
@@ -32,9 +32,10 @@ interface TypewriterProps {
   shakeThreshold?: number;
   cursorPosition?: 'bottom' | 'center';
   textWidth?: TextWidth;
+  whitespaceMode?: WhitespaceMode;
 }
 
-export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, shakeThreshold = 120, cursorPosition = 'bottom', textWidth = 'full' }, ref) => {
+export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, shakeThreshold = 120, cursorPosition = 'bottom', textWidth = 'full', whitespaceMode = 'none' }, ref) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
@@ -43,10 +44,12 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
   const shakeMultRef = useRef(screenshakeMultiplier);
   const shakeThreshRef = useRef(shakeThreshold);
   const cursorPosRef = useRef(cursorPosition);
+  const whitespaceModeRef = useRef(whitespaceMode);
   screenshakeRef.current = screenshake;
   shakeMultRef.current = screenshakeMultiplier;
   shakeThreshRef.current = shakeThreshold;
   cursorPosRef.current = cursorPosition;
+  whitespaceModeRef.current = whitespaceMode;
 
   const linesRef = useRef<string[]>(['']);
   const sourceIndexRef = useRef(0);
@@ -56,6 +59,24 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
   const fluxAvgRef = useRef(0);
   const shakeDxRef = useRef(0);
   const shakeDyRef = useRef(0);
+
+  const appendCharacter = (ch: string) => {
+    if (ch === '\n') {
+      linesRef.current.push('');
+    } else {
+      linesRef.current[linesRef.current.length - 1] += ch;
+    }
+
+    if (linesRef.current.length > MAX_VISIBLE_LINES) {
+      linesRef.current.splice(0, linesRef.current.length - MAX_VISIBLE_LINES);
+    }
+  };
+
+  const shouldSkipImmediately = (ch: string) => {
+    if (whitespaceModeRef.current === 'inline') return ch === ' ' || ch === '\t';
+    if (whitespaceModeRef.current === 'all') return ch === ' ' || ch === '\t' || ch === '\n';
+    return false;
+  };
 
   const doReset = () => {
     linesRef.current = [''];
@@ -120,20 +141,19 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
       charAccumRef.current -= count;
       if (count === 0) return 0;
 
-      let newChars = '';
       for (let i = 0; i < count; i++) {
         const ch = textSource[sourceIndexRef.current % textSource.length];
         sourceIndexRef.current++;
-        if (ch === '\n') {
-          linesRef.current.push('');
-        } else {
-          newChars += ch;
-        }
-      }
-      linesRef.current[linesRef.current.length - 1] += newChars;
 
-      if (linesRef.current.length > MAX_VISIBLE_LINES) {
-        linesRef.current.splice(0, linesRef.current.length - MAX_VISIBLE_LINES);
+        appendCharacter(ch);
+
+        while (textSource.length > 0) {
+          const nextCh = textSource[sourceIndexRef.current % textSource.length];
+          if (!shouldSkipImmediately(nextCh)) break;
+
+          sourceIndexRef.current++;
+          appendCharacter(nextCh);
+        }
       }
 
       textEl.textContent = linesRef.current.join('\n');

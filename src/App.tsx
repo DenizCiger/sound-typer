@@ -12,7 +12,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, cursorPosition: 'bottom', textWidth: 'full' };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none' };
 
 function loadSettings(): SettingsState {
   try {
@@ -189,7 +189,7 @@ export default function App() {
         onOpenSettings={() => setShowSettings(true)}
       />
       {showVisualizer && <Visualizer dataArrayRef={engine.dataArray} isPlaying={isPlaying} />}
-      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} screenshakeMultiplier={settings.screenshakeMultiplier} shakeThreshold={shakeThreshold} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} />
+      <Typewriter ref={typewriterRef} textSource={textSource || LOREM} screenshake={settings.screenshake} screenshakeMultiplier={settings.screenshakeMultiplier} shakeThreshold={shakeThreshold} cursorPosition={settings.cursorPosition} textWidth={settings.textWidth} whitespaceMode={settings.whitespaceMode} />
       {showSettings && <Settings settings={settings} onChange={handleSettingsChange} onClose={() => setShowSettings(false)} />}
     </div>
   );

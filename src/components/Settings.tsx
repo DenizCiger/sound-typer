@@ -2,12 +2,14 @@ import { useRef, useCallback, useState, useEffect } from 'react';
 import styles from '../styles/Settings.module.css';
 
 export type TextWidth = 'full' | 'large' | 'medium' | 'small';
+export type WhitespaceMode = 'none' | 'inline' | 'all';
 
 export interface SettingsState {
   screenshake: boolean;
   screenshakeMultiplier: number;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
+  whitespaceMode: WhitespaceMode;
 }
 
 const WIDTH_STOPS: { value: TextWidth; label: string }[] = [
@@ -15,6 +17,12 @@ const WIDTH_STOPS: { value: TextWidth; label: string }[] = [
   { value: 'large', label: 'Large' },
   { value: 'medium', label: 'Medium' },
   { value: 'small', label: 'Small' },
+];
+
+const WHITESPACE_OPTIONS: { value: WhitespaceMode; label: string }[] = [
+  { value: 'none', label: 'Count all' },
+  { value: 'inline', label: 'Skip inline' },
+  { value: 'all', label: 'Skip all' },
 ];
 
 interface Props {
@@ -126,6 +134,20 @@ export function Settings({ settings, onChange, onClose }: Props) {
             >
               Center
             </button>
+          </div>
+        </div>
+        <div className={styles.row}>
+          <span className={styles.label}>Whitespace</span>
+          <div className={styles.segmented}>
+            {WHITESPACE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className={`${styles.segBtn} ${settings.whitespaceMode === option.value ? styles.segBtnActive : ''}`}
+                onClick={() => onChange({ ...settings, whitespaceMode: option.value })}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
         <div className={styles.rowStacked}>
