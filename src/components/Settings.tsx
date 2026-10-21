@@ -1,8 +1,11 @@
 import { useRef, useCallback, useState, useEffect } from 'react';
+import type { Difficulty } from '../game/common';
+import type { GameStyle } from '../game/types';
 import styles from '../styles/Settings.module.css';
 
 export type TextWidth = 'full' | 'large' | 'medium' | 'small';
 export type WhitespaceMode = 'none' | 'inline' | 'all';
+export type AppMode = 'type' | 'play';
 
 export interface SettingsState {
   screenshake: boolean;
@@ -13,6 +16,10 @@ export interface SettingsState {
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
   whitespaceMode: WhitespaceMode;
+  /** Typewriter or the rhythm game. */
+  mode: AppMode;
+  difficulty: Difficulty;
+  gameStyle: GameStyle;
 }
 
 /** How the music maps to typing. Stored separately from layout settings. */
@@ -28,6 +35,17 @@ const WIDTH_STOPS: { value: TextWidth; label: string }[] = [
   { value: 'large', label: 'Large' },
   { value: 'medium', label: 'Medium' },
   { value: 'small', label: 'Small' },
+];
+
+const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
+  { value: 'easy', label: 'Easy' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'hard', label: 'Hard' },
+];
+
+const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
+  { value: 'bullets', label: 'Bullet hell' },
+  { value: 'shapes', label: 'Shapes' },
 ];
 
 const WHITESPACE_OPTIONS: { value: WhitespaceMode; label: string }[] = [
@@ -146,7 +164,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
 
   return (
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+      <div className={styles.modal} role="dialog" aria-modal="true" aria-label="Settings" onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <div className={styles.title}>Settings</div>
           <button className={styles.closeBtn} onClick={onClose} aria-label="Close settings">×</button>
@@ -203,6 +221,42 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
                 key={option.value}
                 className={`${styles.segBtn} ${settings.whitespaceMode === option.value ? styles.segBtnActive : ''}`}
                 onClick={() => onChange({ ...settings, whitespaceMode: option.value })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className={styles.section}>Game</div>
+        <div className={styles.row}>
+          <div className={styles.labelGroup}>
+            <span className={styles.label}>Style</span>
+            <span className={styles.hint}>Dodge bullet patterns, or dash through shapes</span>
+          </div>
+          <div className={styles.segmented}>
+            {STYLE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className={`${styles.segBtn} ${settings.gameStyle === option.value ? styles.segBtnActive : ''}`}
+                onClick={() => onChange({ ...settings, gameStyle: option.value })}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className={styles.row}>
+          <div className={styles.labelGroup}>
+            <span className={styles.label}>Difficulty</span>
+            <span className={styles.hint}>Bullet density and speed</span>
+          </div>
+          <div className={styles.segmented}>
+            {DIFFICULTY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                className={`${styles.segBtn} ${settings.difficulty === option.value ? styles.segBtnActive : ''}`}
+                onClick={() => onChange({ ...settings, difficulty: option.value })}
               >
                 {option.label}
               </button>

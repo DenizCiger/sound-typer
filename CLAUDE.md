@@ -11,7 +11,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Sound Typer is a browser app that plays an audio file and "types" text in sync with the music. Louder audio types faster; detected hits (drums, sudden spikes) burst text in and trigger screenshake. Users can load audio files, customize text sources, and tweak how it feels (speed, dynamics, punch, shake, glow) in the Settings modal; the toolbar only holds playback, volume and file pickers.
+Sound Typer is a browser app that plays an audio file and "types" text in sync with the music. Louder audio types faster; detected hits (drums, sudden spikes) burst text in and trigger screenshake. Users can load audio files, customize text sources, and tweak how it feels (speed, dynamics, punch, shake, glow) in the Settings modal; the toolbar holds playback, volume, file pickers and the Type/Game mode toggle.
+
+**Game mode** replaces the typewriter with a procedurally generated rhythm game, in one of two styles: bullet hell (dodge patterns fired on the hits) or Shapes (Just Shapes & Beats style: dash through telegraphed shapes that land on the beat, rewind to checkpoints on death).
 
 ## Architecture
 
@@ -28,9 +30,15 @@ Key pieces:
 - **`src/components/Typewriter.tsx`** — Displays typed text via imperative `feed(frame, dt)`. Spring-physics screenshake, hit glow (`--hit` CSS var), word snapping on strong hits.
 - **`src/components/Controls.tsx`** — Toolbar: file chips (drag-and-drop), transport, volume. Wraps to two rows below 768px.
 - **`src/components/Visualizer.tsx`** — Canvas: log-frequency spectrum + scrolling timeline of intensity and hits.
-- **`src/components/Settings.tsx`** — Modal for all tuning: typing feel (`FeelPrefs`, stored in `sound-typer-prefs`), effects and layout (`SettingsState`, stored in `sound-typer-settings`), reset to defaults.
+- **`src/components/Settings.tsx`** — Modal for all tuning: typing feel (`FeelPrefs`, stored in `sound-typer-prefs`), game difficulty, effects and layout (`SettingsState`, stored in `sound-typer-settings`; also holds the current mode), reset to defaults.
 
-**Persistence:** Three localStorage keys (`sound-typer-prefs`, `sound-typer-text-source`, `sound-typer-settings`) store user preferences, custom text, and settings.
+Game mode (`src/game/`; everything except the renderers is DOM-free and runnable in Bun). Two styles behind one `GameEngine` interface (`types.ts`), picked by `SettingsState.gameStyle`:
+- **`common.ts`** — Seeded RNG (per track, same for every difficulty), section splitting (~6–13 s, snapped to strong hits), sliding per-second budget, shake spring, canvas setup.
+- **`bullets/`** — Bullet hell. `chart.ts` schedules patterns from emitters per section: pellets (weak hits), aimed fans (crisp), rings (bassy/strong), telegraphed lasers (strongest), spiral streams in loud sections. `sim.ts` spawns them as the audio position passes, advances bullets by audio time, handles collisions/grazes/score. `render.ts` draws (sprite-cached glowing bullets, charge-up telegraphs).
+- **`shapes/`** — Just Shapes & Beats style. `chart.ts` gives each section a theme (field, bars, steps, walls, spinner, rain) and turns hits into hazards that warn, go solid on the beat, then shrink; every hazard's geometry is a pure function of time (`geometry()`), shared by collisions and drawing. Bars across the arena are the main element; small hazards come in predictable patterns (bomb trails, shot volleys), pop-ups are placed apart, and homing is limited to small, spaced-out seekers plus targeted bars (they lock onto the player when the warning starts). Every hazard warns at least long enough to walk out of it (`warnFor`), so a dash is never forced. An idle fallback fills silences longer than `idleMax` when the music has hits. The spawn budget and projectile speeds scale with the music's intensity (`intensityAt` in `common.ts`, the typewriter's curve); no single obstacle covers more than half the arena. The renderer is intensity-driven too (speed streaks, camera punch, bass thump, pumping background). Spinner beams follow a sampled `BeamPath` (drifting pivot, loudness-driven spin, kicks on hits) and big hits fire ray bursts from the pivot. `sim.ts`: movement, dash (invulnerable, cooldown), health, checkpoints; running out of health asks Game to rewind the song (`takeRewind`), which doesn't count as a seek.
+- **`src/components/Game.tsx`** — Canvas + input (keyboard, mouse, touch incl. dash gestures) + HUD + start/pause/results overlays (style picker on the Ready card). Reuses a `TypingDriver` only to get music hits for shake/glow. App calls `frame()` each rAF, `start()` before playback and `finish()` when the song ends.
+
+**Persistence:** Four localStorage keys (`sound-typer-prefs`, `sound-typer-text-source`, `sound-typer-settings`, `sound-typer-scores`) store user preferences, custom text, settings, and best game scores per track + difficulty (+ style).
 
 ## Styling
 

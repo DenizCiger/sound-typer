@@ -179,6 +179,43 @@
   color: var(--text);
 }
 
+.modeToggle {
+  display: flex;
+  height: 26px;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.modeBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  font-size: 11px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.modeBtn + .modeBtn {
+  border-left: 1px solid var(--border);
+}
+
+.modeBtn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.modeBtnActive,
+.modeBtnActive:hover {
+  color: var(--bg);
+  background: var(--text);
+}
+
 .trackChip {
   min-width: 0;
   flex-shrink: 1;
@@ -286,6 +323,19 @@
   .chip {
     height: 36px;
     max-width: none;
+  }
+
+  .modeToggle {
+    height: 44px;
+  }
+
+  /* Icons only, row 1 is tight on phones */
+  .modeBtn {
+    padding: 0 14px;
+  }
+
+  .modeBtn span {
+    display: none;
   }
 
   /* Row 1: files + buttons. Row 2: transport across the full width. */

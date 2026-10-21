@@ -17,6 +17,27 @@ bun run dev
 2. Hit play
 3. Watch the text get typed out at a pace driven by the audio
 
+### Game mode
+
+Switch the toolbar toggle from **Type** to **Game** for a rhythm game generated from the song. Pick a style on the start screen (or in Settings):
+
+**Bullet hell** — emitters charge up and fire on the beat: bass hits throw out rings, crisp hits fire aimed spreads, the biggest hits get a warned laser, and loud sections fill the screen with spirals.
+
+- **Move** — mouse, WASD or arrow keys; on touch, drag anywhere (the ship moves relative to your finger)
+- **Focus** — hold Shift or the mouse button for slow, precise movement
+- **Space**, **Esc** or **P** — pause / resume
+- Only the white dot is your hitbox. Grazing bullets scores extra. Getting hit clears nearby bullets; there's no game over.
+
+**Shapes** (Just Shapes & Beats style) — faint pink shapes warn where something is about to land, then turn solid exactly on the beat. Mostly bars: full rows and columns slamming down (some aimed at where you're standing), bars marching across the arena one lane per beat, walls sweeping through with a gap, and beams spinning around a drifting pivot, speeding up with the music and firing bursts of rays on the big hits. In between: circles and boxes popping up on the beat, trails of small bombs stepping across the arena, rows of shots flying in from an edge, and the occasional small bomb that lands where you were standing. Every warning lasts long enough to walk out of the way, so you never *have* to dash. Like the typewriter, it follows the music's intensity: quiet passages thin out and the background crawls; loud ones fill up, the background streaks rush past, and strong hits punch the camera in and thump the arena.
+
+- **Move** — mouse, WASD or arrow keys; on touch, drag anywhere
+- **Dash** — Space, Shift, X or click (on touch: a quick tap or a second finger). You're invulnerable while dashing, so you can dash *through* shapes, which scores extra
+- **Esc** or **P** — pause
+- You have a few health pips (more on Easy). Run out and the song rewinds to the last checkpoint (about every 30 s)
+- Dashes need to recharge (a ring around you fills back up), longer on harder difficulties
+
+In both styles, the score multiplier grows the longer you go without getting hit. At the end you get a grade and your best score for that song, style and difficulty. Seeking turns the run into a practice run that doesn't count.
+
 ## How it works
 
 When a song is loaded it's analyzed once, up front, in a Web Worker (well under a second for a typical song):
@@ -33,6 +54,7 @@ Because the whole track is known in advance, playback just looks up features at 
 - **Visualizer** — spectrum on top; below it a timeline of the typing intensity and detected hits (bright ones shake), including a look-ahead past the playhead
 - **Settings** (gear icon):
   - **Typing** — Speed (characters per second at full volume), Dynamics (higher = quiet parts slower, loud parts stand out), Punch (how hard hits slam text in), Hits complete words, Whitespace handling
+  - **Game** — Style (Bullet hell / Shapes), Difficulty (Easy / Normal / Hard: density, speed, warning time, health)
   - **Effects** — Screen shake on/off, shake strength and threshold, glow on hits (0 = off, up to 3x)
   - **Layout** — Text anchor (bottom or center), text width (ignored on phones)
   - **Reset to defaults**

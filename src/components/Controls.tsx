@@ -1,4 +1,5 @@
 import { useRef, useState, type ReactNode } from "react";
+import type { AppMode } from "./Settings";
 import styles from "../styles/Controls.module.css";
 
 const IconPlay = () => (
@@ -118,6 +119,40 @@ const IconGear = () => (
   </svg>
 );
 
+const IconKeyboard = () => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
+  </svg>
+);
+
+const IconGamepad = () => (
+  <svg
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="1.75"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+  >
+    <path d="M6 12h4M8 10v4" />
+    <circle cx="15" cy="13" r="0.5" />
+    <circle cx="18" cy="11" r="0.5" />
+    <path d="M17.32 5H6.68a4 4 0 0 0-3.98 3.59L2 15a3 3 0 0 0 5.4 1.8L9 15h6l1.6 1.8A3 3 0 0 0 22 15l-.7-6.41A4 4 0 0 0 17.32 5z" />
+  </svg>
+);
+
 const IconBars = () => (
   <svg
     width="12"
@@ -222,6 +257,8 @@ interface Props {
   volume: number;
   textSourceName: string | null;
   showVisualizer: boolean;
+  mode: AppMode;
+  onModeChange: (mode: AppMode) => void;
   onTogglePlay: () => void;
   onSeek: (s: number) => void;
   onLoad: (file: File) => void;
@@ -241,6 +278,8 @@ export function Controls({
   volume,
   textSourceName,
   showVisualizer,
+  mode,
+  onModeChange,
   onTogglePlay,
   onSeek,
   onLoad,
@@ -383,6 +422,28 @@ export function Controls({
       />
       <div className={styles.spacer} />
 
+      <div className={styles.modeToggle} role="group" aria-label="Mode">
+        <button
+          className={`${styles.modeBtn} ${mode === "type" ? styles.modeBtnActive : ""}`}
+          onClick={() => onModeChange("type")}
+          aria-pressed={mode === "type"}
+          title="Typewriter"
+        >
+          <IconKeyboard />
+          <span>Type</span>
+        </button>
+        <button
+          className={`${styles.modeBtn} ${mode === "play" ? styles.modeBtnActive : ""}`}
+          onClick={() => onModeChange("play")}
+          aria-pressed={mode === "play"}
+          title="Rhythm game: dodge bullets fired to the music"
+        >
+          <IconGamepad />
+          <span>Game</span>
+        </button>
+      </div>
+
+      {mode === "type" && (
       <div
         className={`${styles.chip} ${styles.textChip} ${textSourceName ? styles.chipActive : ""} ${textChipDragging ? styles.chipDragging : ""}`}
         onDragOver={(e) => {
@@ -417,6 +478,7 @@ export function Controls({
           </button>
         )}
       </div>
+      )}
 
       <button
         onClick={onToggleVisualizer}

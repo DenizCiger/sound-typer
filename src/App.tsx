@@ -9,13 +9,15 @@ import { TypingDriver, type DriverFrame, type DriverParams } from './audio/drive
 import { Controls } from './components/Controls';
 import { Visualizer, type VisualizerHandle } from './components/Visualizer';
 import { Typewriter, type TypewriterHandle } from './components/Typewriter';
-import { Settings, type SettingsState, type FeelPrefs } from './components/Settings';
+import { Game, type GameHandle } from './components/Game';
+import type { GameStyle } from './game/types';
+import { Settings, type SettingsState, type FeelPrefs, type AppMode } from './components/Settings';
 
 const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none' };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'type', difficulty: 'normal', gameStyle: 'bullets' };
 
 interface Prefs extends FeelPrefs {
   volume: number;
@@ -86,7 +88,8 @@ export default function App() {
   const [playbackPos, setPlaybackPos] = useState(0);
   const [textSource, setTextSourceState] = useState<string | null>(savedTextSource);
   const [textSourceName, setTextSourceName] = useState<string | null>(savedTextSource ? 'Custom' : null);
-  const [showVisualizer, setShowVisualizer] = useState(true);
+  // The arena wants the room, so the visualizer is remembered per mode
+  const [visualizerModes, setVisualizerModes] = useState<Record<AppMode, boolean>>({ type: true, play: false });
   const [settings, setSettings] = useState<SettingsState>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
 
@@ -96,6 +99,7 @@ export default function App() {
   }, []);
 
   const typewriterRef = useRef<TypewriterHandle>(null);
+  const gameRef = useRef<GameHandle>(null);
   const visualizerRef = useRef<VisualizerHandle>(null);
   const driverRef = useRef<TypingDriver | null>(null);
   const loadIdRef = useRef(0);
@@ -106,6 +110,7 @@ export default function App() {
   }, [prefs]);
 
   const handleEnded = useCallback(() => {
+    gameRef.current?.finish();
     setIsPlaying(false);
     setPlaybackPos(0);
   }, []);
@@ -142,6 +147,7 @@ export default function App() {
       engine.pause();
       setIsPlaying(false);
     } else if (duration > 0) {
+      gameRef.current?.start();
       engine.play();
       setIsPlaying(true);
     }
@@ -160,11 +166,30 @@ export default function App() {
     setPrefs((p) => ({ ...p, ...feel }));
   }, []);
 
-  // Volume is left alone: it's not part of the "feel"
+  // Volume, mode and game style are left alone: they're not part of the "feel"
   const handleReset = useCallback(() => {
     setPrefs((p) => ({ ...p, ...DEFAULT_FEEL }));
-    handleSettingsChange(DEFAULT_SETTINGS);
-  }, [handleSettingsChange]);
+    handleSettingsChange({ ...DEFAULT_SETTINGS, mode: settings.mode, gameStyle: settings.gameStyle });
+  }, [handleSettingsChange, settings.mode, settings.gameStyle]);
+
+  const handleModeChange = useCallback((mode: AppMode) => {
+    handleSettingsChange({ ...settings, mode });
+  }, [handleSettingsChange, settings]);
+
+  const handleGameStyle = useCallback((gameStyle: GameStyle) => {
+    handleSettingsChange({ ...settings, gameStyle });
+  }, [handleSettingsChange, settings]);
+
+  const handleRestart = useCallback(() => {
+    if (duration <= 0) return;
+    engine.seek(0);
+    setPlaybackPos(0);
+    gameRef.current?.start();
+    engine.play();
+    setIsPlaying(true);
+  }, [engine, duration]);
+
+  const showVisualizer = visualizerModes[settings.mode];
 
   const handleCloseSettings = useCallback(() => setShowSettings(false), []);
 
@@ -201,9 +226,12 @@ export default function App() {
   const onFrame = useCallback((dt: number) => {
     const pos = engine.getPosition();
     const params: DriverParams = { maxCps: prefs.maxCps, dynamics: prefs.dynamics, punch: prefs.punch };
-    const frame = driverRef.current?.step(pos, dt, params) ?? EMPTY_FRAME;
-
-    typewriterRef.current?.feed(frame, dt);
+    if (settings.mode === 'play') {
+      gameRef.current?.frame(pos, dt);
+    } else {
+      const frame = driverRef.current?.step(pos, dt, params) ?? EMPTY_FRAME;
+      typewriterRef.current?.feed(frame, dt);
+    }
     drawVisualizer(pos);
 
     const now = performance.now();
@@ -211,7 +239,7 @@ export default function App() {
       setPlaybackPos(pos);
       lastUiUpdateRef.current = now;
     }
-  }, [engine, prefs.maxCps, prefs.dynamics, prefs.punch, drawVisualizer]);
+  }, [engine, prefs.maxCps, prefs.dynamics, prefs.punch, drawVisualizer, settings.mode]);
 
   useAnimationLoop(isPlaying, onFrame);
 
@@ -231,16 +259,37 @@ export default function App() {
         volume={prefs.volume}
         textSourceName={textSourceName}
         showVisualizer={showVisualizer}
+        mode={settings.mode}
+        onModeChange={handleModeChange}
         onTogglePlay={handleTogglePlay}
         onSeek={handleSeek}
         onLoad={handleFile}
         onVolume={handleVolume}
         onLoadText={handleTextFile}
         onRemoveText={handleRemoveTextSource}
-        onToggleVisualizer={() => setShowVisualizer(!showVisualizer)}
+        onToggleVisualizer={() => setVisualizerModes((v) => ({ ...v, [settings.mode]: !v[settings.mode] }))}
         onOpenSettings={() => setShowSettings(true)}
       />
       {showVisualizer && <Visualizer ref={visualizerRef} />}
+      {settings.mode === 'play' ? (
+        <Game
+          ref={gameRef}
+          analysis={analysis}
+          trackName={trackName}
+          status={status}
+          isPlaying={isPlaying}
+          style={settings.gameStyle}
+          difficulty={settings.difficulty}
+          screenshake={settings.screenshake}
+          screenshakeMultiplier={settings.screenshakeMultiplier}
+          shakeThreshold={prefs.shakeThreshold}
+          glowIntensity={settings.glowIntensity}
+          onStyleChange={handleGameStyle}
+          onTogglePlay={handleTogglePlay}
+          onRestart={handleRestart}
+          onSeek={handleSeek}
+        />
+      ) : (
       <Typewriter
         ref={typewriterRef}
         textSource={textSource || LOREM}
@@ -253,6 +302,7 @@ export default function App() {
         textWidth={settings.textWidth}
         whitespaceMode={settings.whitespaceMode}
       />
+      )}
       {showSettings && (
         <Settings
           settings={settings}
