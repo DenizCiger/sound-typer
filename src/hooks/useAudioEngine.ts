@@ -1,148 +1,139 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useMemo, useEffect } from 'react';
 
 export interface AudioEngine {
-  load: (file: File) => Promise<void>;
+  load: (file: File) => Promise<AudioBuffer>;
   play: () => void;
   pause: () => void;
   seek: (seconds: number) => void;
   setVolume: (v: number) => void;
+  /** Position (seconds) of the audio currently coming out of the speakers. */
   getPosition: () => number;
   analyser: React.RefObject<AnalyserNode | null>;
-  dataArray: React.RefObject<Uint8Array | null>;
-  shakeAnalyser: React.RefObject<AnalyserNode | null>;
-  shakeDataArray: React.RefObject<Uint8Array | null>;
-  pauseOffset: React.RefObject<number>;
-  duration: React.RefObject<number>;
 }
 
-export function useAudioEngine(onEnded: () => void): AudioEngine {
+export function useAudioEngine(onEnded: () => void, initialVolume: number): AudioEngine {
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const shakeAnalyserRef = useRef<AnalyserNode | null>(null);
-  const shakeDataArrayRef = useRef<Uint8Array | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
   const sourceRef = useRef<AudioBufferSourceNode | null>(null);
   const audioBufferRef = useRef<AudioBuffer | null>(null);
-  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const volumeRef = useRef(initialVolume);
   const pauseOffsetRef = useRef(0);
   const playStartTimeRef = useRef(0);
   const isPlayingRef = useRef(false);
+  const onEndedRef = useRef(onEnded);
+  useEffect(() => {
+    onEndedRef.current = onEnded;
+  });
 
   const load = useCallback(async (file: File) => {
-    // Tear down existing context if any
     if (sourceRef.current) {
+      try { sourceRef.current.stop(); } catch { /* already stopped */ }
       sourceRef.current = null;
-      try { audioCtxRef.current?.close(); } catch (_) {}
     }
+    audioCtxRef.current?.close().catch(() => {});
 
-    const ctx = new AudioContext();
+    const ctx = new AudioContext({ latencyHint: 'interactive' });
     const analyser = ctx.createAnalyser();
-    analyser.fftSize = 512;
-    const dataArray = new Uint8Array(analyser.frequencyBinCount);
-
-    const shakeAnalyser = ctx.createAnalyser();
-    shakeAnalyser.fftSize = 512;
-    shakeAnalyser.smoothingTimeConstant = 0.3;
-    const shakeDataArray = new Uint8Array(shakeAnalyser.frequencyBinCount);
-
+    analyser.fftSize = 8192;
+    analyser.smoothingTimeConstant = 0.55;
     const gainNode = ctx.createGain();
-    gainNode.gain.value = 0.1;
+    gainNode.gain.value = volumeRef.current;
+    analyser.connect(gainNode);
+    gainNode.connect(ctx.destination);
 
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+    const audioBuffer = await ctx.decodeAudioData(await file.arrayBuffer());
 
     audioCtxRef.current = ctx;
     analyserRef.current = analyser;
-    shakeAnalyserRef.current = shakeAnalyser;
-    shakeDataArrayRef.current = shakeDataArray;
     gainNodeRef.current = gainNode;
-    dataArrayRef.current = dataArray;
     audioBufferRef.current = audioBuffer;
     pauseOffsetRef.current = 0;
     isPlayingRef.current = false;
+    return audioBuffer;
+  }, []);
+
+  const contextTime = useCallback(() => {
+    const ctx = audioCtxRef.current;
+    if (!ctx) return 0;
+    // currentTime is when the *next* block gets rendered and only advances in coarse steps.
+    // The output timestamp tells us what is audible right now, latency included.
+    const ts = ctx.getOutputTimestamp?.();
+    if (ts && ts.contextTime !== undefined && ts.performanceTime !== undefined && ts.performanceTime > 0) {
+      return ts.contextTime + (performance.now() - ts.performanceTime) / 1000;
+    }
+    return ctx.currentTime - (ctx.outputLatency || ctx.baseLatency || 0);
   }, []);
 
   const startSource = useCallback((offset: number) => {
     const ctx = audioCtxRef.current;
     const analyser = analyserRef.current;
-    const gainNode = gainNodeRef.current;
     const audioBuffer = audioBufferRef.current;
-    if (!ctx || !analyser || !gainNode || !audioBuffer) return;
+    if (!ctx || !analyser || !audioBuffer) return;
 
-    const shakeAnalyser = shakeAnalyserRef.current;
     const source = ctx.createBufferSource();
     source.buffer = audioBuffer;
     source.connect(analyser);
-    if (shakeAnalyser) source.connect(shakeAnalyser);
-    analyser.connect(gainNode);
-    gainNode.connect(ctx.destination);
-    source.start(0, offset);
-    playStartTimeRef.current = ctx.currentTime;
+    const startAt = ctx.currentTime + 0.01;
+    source.start(startAt, offset);
+    playStartTimeRef.current = startAt;
     source.onended = () => {
       if (sourceRef.current === source) {
+        sourceRef.current = null;
         pauseOffsetRef.current = 0;
         isPlayingRef.current = false;
-        onEnded();
+        onEndedRef.current();
       }
     };
     sourceRef.current = source;
-  }, [onEnded]);
-
-  const stopSource = useCallback(() => {
-    const ctx = audioCtxRef.current;
-    const source = sourceRef.current;
-    const audioBuffer = audioBufferRef.current;
-    if (!source) return;
-
-    const elapsed = (ctx?.currentTime ?? 0) - playStartTimeRef.current;
-    pauseOffsetRef.current = Math.min(
-      pauseOffsetRef.current + elapsed,
-      audioBuffer?.duration ?? 0
-    );
-    sourceRef.current = null;
-    try { source.stop(); } catch (_) {}
-    source.disconnect();
   }, []);
 
+  const getPosition = useCallback(() => {
+    if (!isPlayingRef.current) return pauseOffsetRef.current;
+    const elapsed = Math.max(0, contextTime() - playStartTimeRef.current);
+    return Math.min(pauseOffsetRef.current + elapsed, audioBufferRef.current?.duration ?? 0);
+  }, [contextTime]);
+
+  const stopSource = useCallback(() => {
+    const source = sourceRef.current;
+    if (!source) return;
+    // Resume from what was actually heard, not from what was already buffered
+    const elapsed = Math.max(0, contextTime() - playStartTimeRef.current);
+    pauseOffsetRef.current = Math.min(pauseOffsetRef.current + elapsed, audioBufferRef.current?.duration ?? 0);
+    sourceRef.current = null;
+    try { source.stop(); } catch { /* already stopped */ }
+    source.disconnect();
+  }, [contextTime]);
+
   const play = useCallback(() => {
+    if (!audioBufferRef.current || isPlayingRef.current) return;
     audioCtxRef.current?.resume();
     startSource(pauseOffsetRef.current);
     isPlayingRef.current = true;
   }, [startSource]);
 
   const pause = useCallback(() => {
+    if (!isPlayingRef.current) return;
     stopSource();
     isPlayingRef.current = false;
   }, [stopSource]);
 
   const seek = useCallback((seconds: number) => {
-    pauseOffsetRef.current = seconds;
     if (isPlayingRef.current) {
       stopSource();
+      pauseOffsetRef.current = seconds;
       startSource(seconds);
+    } else {
+      pauseOffsetRef.current = seconds;
     }
   }, [stopSource, startSource]);
 
   const setVolume = useCallback((v: number) => {
+    volumeRef.current = v;
     if (gainNodeRef.current) gainNodeRef.current.gain.value = v;
   }, []);
 
-  const getPosition = useCallback(() => {
-    if (!isPlayingRef.current) return pauseOffsetRef.current;
-    const elapsed = (audioCtxRef.current?.currentTime ?? 0) - playStartTimeRef.current;
-    return pauseOffsetRef.current + elapsed;
-  }, []);
-
-  const durationRef = useRef(0);
-  // Keep duration in sync via a getter-like ref
-  const durationProxy = new Proxy(durationRef, {
-    get(target, prop) {
-      if (prop === 'current') return audioBufferRef.current?.duration ?? 0;
-      return (target as any)[prop];
-    }
-  });
-
-  return {
+  return useMemo(() => ({
     load,
     play,
     pause,
@@ -150,10 +141,5 @@ export function useAudioEngine(onEnded: () => void): AudioEngine {
     setVolume,
     getPosition,
     analyser: analyserRef,
-    dataArray: dataArrayRef,
-    shakeAnalyser: shakeAnalyserRef,
-    shakeDataArray: shakeDataArrayRef,
-    pauseOffset: pauseOffsetRef,
-    duration: durationProxy as React.RefObject<number>,
-  };
+  }), [load, play, pause, seek, setVolume, getPosition]);
 }

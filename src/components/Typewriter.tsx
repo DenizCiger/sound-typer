@@ -1,10 +1,12 @@
-import { useRef, useImperativeHandle, forwardRef } from 'react';
+import { useRef, useImperativeHandle, forwardRef, useEffect } from 'react';
 import type { TextWidth, WhitespaceMode } from './Settings';
-import { LOREM, SILENCE_THRESHOLD, MAX_VISIBLE_LINES } from '../constants';
+import type { DriverFrame } from '../audio/driver';
+import { LOREM, MAX_VISIBLE_LINES } from '../constants';
 import styles from '../styles/Typewriter.module.css';
 
 export interface TypewriterHandle {
-  feed: (intensity: number, speedMultiplier: number, shakeData?: Uint8Array | null) => number;
+  /** Applies one frame of typing + effects. Returns the number of characters typed. */
+  feed: (frame: DriverFrame, dt: number) => number;
   reset: () => void;
 }
 
@@ -25,40 +27,42 @@ const WIDTH_MAP: Record<TextWidth, string | undefined> = {
   small: '40%',
 };
 
+// Shake spring: a damped oscillator kicked by hits, so it snaps and wobbles out
+const SHAKE_FREQ = 11; // Hz
+const SHAKE_DAMPING = 0.32; // damping ratio (<1 = wobbly)
+const SHAKE_MAX_PX = 12;
+const GLOW_DECAY = 0.18; // seconds
+const MAX_WORD_SNAP = 14;
+// Only real hits complete words; a faint hi-hat nudging in a letter shouldn't
+const MIN_SNAP_BURST = 5;
+
 interface TypewriterProps {
   textSource?: string;
   screenshake?: boolean;
   screenshakeMultiplier?: number;
   shakeThreshold?: number;
+  glowIntensity?: number;
+  snapToWords?: boolean;
   cursorPosition?: 'bottom' | 'center';
   textWidth?: TextWidth;
   whitespaceMode?: WhitespaceMode;
 }
 
-export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, shakeThreshold = 120, cursorPosition = 'bottom', textWidth = 'full', whitespaceMode = 'none' }, ref) => {
+export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, shakeThreshold = 0.6, glowIntensity = 1, snapToWords = true, cursorPosition = 'bottom', textWidth = 'full', whitespaceMode = 'none' }, ref) => {
+  const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
   const cursorRef = useRef<HTMLSpanElement>(null);
 
-  const screenshakeRef = useRef(screenshake);
-  const shakeMultRef = useRef(screenshakeMultiplier);
-  const shakeThreshRef = useRef(shakeThreshold);
-  const cursorPosRef = useRef(cursorPosition);
-  const whitespaceModeRef = useRef(whitespaceMode);
-  screenshakeRef.current = screenshake;
-  shakeMultRef.current = screenshakeMultiplier;
-  shakeThreshRef.current = shakeThreshold;
-  cursorPosRef.current = cursorPosition;
-  whitespaceModeRef.current = whitespaceMode;
+  const propsRef = useRef({ textSource, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, snapToWords, whitespaceMode });
+  useEffect(() => {
+    propsRef.current = { textSource, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, snapToWords, whitespaceMode };
+  });
 
   const linesRef = useRef<string[]>(['']);
   const sourceIndexRef = useRef(0);
-  const charAccumRef = useRef(0);
-  const wasIntenseRef = useRef(false);
-  const prevBassRef = useRef(new Float32Array(20));
-  const fluxAvgRef = useRef(0);
-  const shakeDxRef = useRef(0);
-  const shakeDyRef = useRef(0);
+  const shakeRef = useRef({ x: 0, y: 0, vx: 0, vy: 0, angle: 0 });
+  const glowRef = useRef(0);
 
   const appendCharacter = (ch: string) => {
     if (ch === '\n') {
@@ -73,93 +77,110 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
   };
 
   const shouldSkipImmediately = (ch: string) => {
-    if (whitespaceModeRef.current === 'inline') return ch === ' ' || ch === '\t';
-    if (whitespaceModeRef.current === 'all') return ch === ' ' || ch === '\t' || ch === '\n';
+    const mode = propsRef.current.whitespaceMode;
+    if (mode === 'inline') return ch === ' ' || ch === '\t';
+    if (mode === 'all') return ch === ' ' || ch === '\t' || ch === '\n';
     return false;
+  };
+
+  const peek = () => {
+    const src = propsRef.current.textSource;
+    return src[sourceIndexRef.current % src.length];
+  };
+
+  const typeOne = () => {
+    appendCharacter(peek());
+    sourceIndexRef.current++;
+    const src = propsRef.current.textSource;
+    // Bounded, so a whitespace-only source can't spin forever
+    for (let guard = 0; guard < src.length && shouldSkipImmediately(peek()); guard++) {
+      appendCharacter(peek());
+      sourceIndexRef.current++;
+    }
+  };
+
+  const applyShake = (dt: number) => {
+    const s = shakeRef.current;
+    const omega = 2 * Math.PI * SHAKE_FREQ;
+    const k = omega * omega;
+    const c = 2 * SHAKE_DAMPING * omega;
+    // Sub-step so the spring is stable on long frames
+    const steps = Math.max(1, Math.ceil(dt / (1 / 240)));
+    const h = Math.min(dt, 0.1) / steps;
+    for (let i = 0; i < steps; i++) {
+      s.vx += (-k * s.x - c * s.vx) * h;
+      s.vy += (-k * s.y - c * s.vy) * h;
+      s.x += s.vx * h;
+      s.y += s.vy * h;
+    }
+    const textEl = textRef.current;
+    if (!textEl) return;
+    if (Math.abs(s.x) > 0.3 || Math.abs(s.y) > 0.3) {
+      textEl.style.transform = `translate(${s.x.toFixed(2)}px, ${s.y.toFixed(2)}px)`;
+    } else if (textEl.style.transform) {
+      textEl.style.transform = '';
+    }
+  };
+
+  const kickShake = (strength: number, lowness: number) => {
+    const p = propsRef.current;
+    if (!p.screenshake || strength < p.shakeThreshold) return;
+    const s = shakeRef.current;
+    // Bassy hits (kicks, booms) shake harder than crisp ones (hats, claps)
+    const mag = SHAKE_MAX_PX * p.screenshakeMultiplier * Math.pow(strength, 1.5) * (0.5 + 0.5 * lowness);
+    // Mostly reverse the previous direction so consecutive hits feel like impacts, not drift
+    s.angle += Math.PI + (Math.random() - 0.5) * Math.PI * 0.9;
+    const v = mag * 2 * Math.PI * SHAKE_FREQ;
+    s.vx += Math.cos(s.angle) * v;
+    s.vy += Math.sin(s.angle) * v;
   };
 
   const doReset = () => {
     linesRef.current = [''];
     sourceIndexRef.current = 0;
-    charAccumRef.current = 0;
-    wasIntenseRef.current = false;
-    prevBassRef.current.fill(0);
-    fluxAvgRef.current = 0;
-    shakeDxRef.current = 0;
-    shakeDyRef.current = 0;
+    shakeRef.current = { x: 0, y: 0, vx: 0, vy: 0, angle: 0 };
+    glowRef.current = 0;
 
-    if (textRef.current) textRef.current.textContent = '';
-    if (textRef.current) textRef.current.style.transform = '';
+    if (textRef.current) {
+      textRef.current.textContent = '';
+      textRef.current.style.transform = '';
+      if (cursorRef.current) textRef.current.appendChild(cursorRef.current);
+    }
+    outerRef.current?.style.setProperty('--hit', '0');
+    outerRef.current?.style.setProperty('--glow', '0');
   };
 
   useImperativeHandle(ref, () => ({
-    feed(intensity: number, speedMultiplier: number, shakeData?: Uint8Array | null) {
+    feed(frame: DriverFrame, dt: number) {
       const container = containerRef.current;
       const textEl = textRef.current;
       if (!container || !textEl) return 0;
+      const p = propsRef.current;
 
-      // Decay shake every frame
-      shakeDxRef.current *= 0.82;
-      shakeDyRef.current *= 0.82;
-
-      // Onset detection from bass spectral flux
-      if (screenshakeRef.current && shakeData) {
-        const BASS_BINS = 20;
-        let flux = 0;
-        for (let i = 0; i < BASS_BINS; i++) {
-          const diff = shakeData[i] - prevBassRef.current[i];
-          if (diff > 0) flux += diff;
-          prevBassRef.current[i] = shakeData[i];
-        }
-
-        fluxAvgRef.current = fluxAvgRef.current * 0.95 + flux * 0.05;
-        const threshold = fluxAvgRef.current * 2.5 + shakeThreshRef.current;
-
-        if (flux > threshold) {
-          const raw = (flux - threshold) / 150;
-          const strength = Math.log2(1 + raw) / Math.log2(2);
-          const mag = strength * 14 * shakeMultRef.current;
-          shakeDxRef.current = (Math.random() * 2 - 1) * mag;
-          shakeDyRef.current = (Math.random() * 2 - 1) * mag;
-        }
+      for (const hit of frame.hits) {
+        kickShake(hit.strength, hit.lowness);
+        if (p.glowIntensity) glowRef.current = Math.max(glowRef.current, hit.strength);
       }
+      applyShake(dt);
 
-      // Apply shake transform to text
-      if (Math.abs(shakeDxRef.current) > 0.5 || Math.abs(shakeDyRef.current) > 0.5) {
-        textEl.style.transform = `translate(${shakeDxRef.current}px, ${shakeDyRef.current}px)`;
-      } else {
-        textEl.style.transform = '';
+      glowRef.current *= Math.exp(-dt / GLOW_DECAY);
+      const hit = glowRef.current > 0.01 ? glowRef.current : 0;
+      // --hit drives the text colour (0..1); --glow the halo, scaled by the user's intensity
+      outerRef.current?.style.setProperty('--hit', Math.min(1, hit * Math.max(1, p.glowIntensity)).toFixed(3));
+      outerRef.current?.style.setProperty('--glow', (hit * p.glowIntensity).toFixed(3));
+
+      let count = 0;
+      for (let i = 0; i < frame.burstChars; i++) { typeOne(); count++; }
+      if (frame.burstChars >= MIN_SNAP_BURST && p.snapToWords) {
+        // Finish the word the hit landed in, so hits slam in whole words
+        for (let i = 0; i < MAX_WORD_SNAP && !/\s/.test(peek()); i++) { typeOne(); count++; }
       }
-
-      if (intensity < SILENCE_THRESHOLD) {
-        wasIntenseRef.current = false;
-        return 0;
-      }
-
-      charAccumRef.current += intensity * speedMultiplier;
-      const count = Math.floor(charAccumRef.current);
-      charAccumRef.current -= count;
+      for (let i = 0; i < frame.flowChars; i++) { typeOne(); count++; }
       if (count === 0) return 0;
-
-      for (let i = 0; i < count; i++) {
-        const ch = textSource[sourceIndexRef.current % textSource.length];
-        sourceIndexRef.current++;
-
-        appendCharacter(ch);
-
-        while (textSource.length > 0) {
-          const nextCh = textSource[sourceIndexRef.current % textSource.length];
-          if (!shouldSkipImmediately(nextCh)) break;
-
-          sourceIndexRef.current++;
-          appendCharacter(nextCh);
-        }
-      }
 
       textEl.textContent = linesRef.current.join('\n');
       // Re-append cursor so it stays at the end
       if (cursorRef.current) textEl.appendChild(cursorRef.current);
-      wasIntenseRef.current = true;
 
       container.scrollTop = container.scrollHeight;
       return count;
@@ -169,7 +190,7 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
   }));
 
   return (
-    <div className={styles.outer} style={{ width: WIDTH_MAP[textWidth], margin: WIDTH_MAP[textWidth] ? '0 auto' : undefined }}>
+    <div ref={outerRef} className={`${styles.outer} ${WIDTH_MAP[textWidth] ? styles.narrow : ''}`} style={{ '--text-width': WIDTH_MAP[textWidth] } as React.CSSProperties}>
       <div
         ref={containerRef}
         className={styles.container}

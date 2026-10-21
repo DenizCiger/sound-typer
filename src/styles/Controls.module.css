@@ -48,9 +48,19 @@
   border-bottom-color: rgba(255, 255, 255, 0.2);
 }
 
+.transport {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 560px;
+}
+
 .seekSlider {
-  width: 120px;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 60px;
+  width: auto;
   -webkit-appearance: none;
   appearance: none;
   height: 3px;
@@ -169,6 +179,11 @@
   color: var(--text);
 }
 
+.trackChip {
+  min-width: 0;
+  flex-shrink: 1;
+}
+
 .chip {
   display: flex;
   align-items: center;
@@ -260,6 +275,7 @@
   .playIcon {
     width: 44px;
     height: 44px;
+    margin-left: -12px;
   }
 
   .iconBtn {
@@ -272,14 +288,34 @@
     max-width: none;
   }
 
+  /* Row 1: files + buttons. Row 2: transport across the full width. */
+  .trackChip {
+    flex: 1 1 0;
+  }
+
+  .textChip {
+    flex: 0 1 auto;
+    min-width: 0;
+    max-width: 45%;
+  }
+
+  .transport {
+    order: 10;
+    flex: 1 0 100%;
+    max-width: none;
+    gap: 10px;
+  }
+
+  /* Phones have hardware volume buttons */
+  .volume {
+    display: none;
+  }
+
   .chipTrashBtn {
     width: 36px;
   }
 
   .seekSlider {
-    width: auto;
-    flex: 1;
-    min-width: 80px;
     height: 6px;
   }
 

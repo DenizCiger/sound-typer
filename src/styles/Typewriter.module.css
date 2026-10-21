@@ -6,6 +6,11 @@
   flex-direction: column;
 }
 
+.narrow {
+  width: var(--text-width);
+  margin: 0 auto;
+}
+
 .container {
   flex: 1;
   background: var(--bg-light);
@@ -34,7 +39,11 @@
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
   font-size: 14px;
   line-height: 1.7;
-  color: var(--text-muted);
+  /* --hit is set per frame by the typewriter: 0 at rest, up to 1 right after a big hit */
+  color: color-mix(in srgb, var(--text) calc(var(--hit, 0) * 100%), var(--text-muted));
+  text-shadow:
+    0 0 calc(var(--glow, 0) * 8px) rgba(255, 255, 255, calc(var(--glow, 0) * 0.7)),
+    0 0 calc(var(--glow, 0) * 24px) rgba(255, 255, 255, calc(var(--glow, 0) * 0.35));
   white-space: pre-wrap;
   overflow-wrap: break-word;
   word-break: break-word;
@@ -43,7 +52,7 @@
 
 .cursor {
   font-size: 14px;
-  color: var(--text-muted);
+  color: inherit;
   animation: blink 1s step-end infinite;
 }
 
@@ -80,6 +89,11 @@
 }
 
 @media (max-width: 767px) {
+  /* Percent widths are unreadable on a phone */
+  .narrow {
+    width: 100%;
+  }
+
   .container {
     padding: 16px;
   }
