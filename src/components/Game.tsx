@@ -5,6 +5,7 @@ import type { Difficulty } from '../game/common';
 import type { EffectSettings, GameEngine, GameInput, GameStyle } from '../game/types';
 import { BulletGame } from '../game/bullets';
 import { ShapesGame } from '../game/shapes';
+import { WaveGame } from '../game/wave';
 import styles from '../styles/Game.module.css';
 
 export interface GameHandle {
@@ -57,10 +58,12 @@ const KEYS: Record<string, [number, number]> = {
   KeyW: [0, -1], KeyS: [0, 1], KeyA: [-1, 0], KeyD: [1, 0],
 };
 const DASH_KEYS = new Set(['Space', 'KeyX', 'KeyK', 'KeyJ', 'ShiftLeft', 'ShiftRight']);
+const HOLD_KEYS = new Set([...DASH_KEYS, 'ArrowUp', 'KeyW']);
 
 const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
   { value: 'bullets', label: 'Bullet hell' },
   { value: 'shapes', label: 'Shapes' },
+  { value: 'wave', label: 'Wave' },
 ];
 
 function loadScores(): Record<string, number> {
@@ -82,7 +85,9 @@ function gradeFor(hits: number, deaths: number, minutes: number) {
 }
 
 function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Difficulty): GameEngine {
-  return style === 'shapes' ? new ShapesGame(analysis, difficulty) : new BulletGame(analysis, difficulty);
+  if (style === 'shapes') return new ShapesGame(analysis, difficulty);
+  if (style === 'wave') return new WaveGame(analysis, difficulty);
+  return new BulletGame(analysis, difficulty);
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
@@ -197,6 +202,12 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         if (!e.repeat) dashRef.current = true;
         return;
       }
+      // The wave flies up while one of these is held
+      if (p.style === 'wave' && p.isPlaying && HOLD_KEYS.has(e.code)) {
+        e.preventDefault();
+        keysRef.current.add(e.code);
+        return;
+      }
       if (e.code === 'Space') {
         if (!e.repeat) p.onTogglePlay();
         return;
@@ -236,11 +247,13 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       if (k) { dx += k[0]; dy += k[1]; }
     }
     const p = pointerRef.current;
-    const shapes = propsRef.current.style === 'shapes';
-    const focus = !shapes && (keys.has('ShiftLeft') || keys.has('ShiftRight') || p.pressed);
+    const style = propsRef.current.style;
+    const focus = style === 'bullets' && (keys.has('ShiftLeft') || keys.has('ShiftRight') || p.pressed);
     const dash = dashRef.current;
     dashRef.current = false;
-    return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: p.target, dash };
+    let hold = p.pressed || p.touches > 0;
+    for (const code of keys) if (HOLD_KEYS.has(code)) hold = true;
+    return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: p.target, dash, hold };
   };
 
   useImperativeHandle(ref, () => ({
@@ -363,6 +376,8 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   };
 
   const shapes = style === 'shapes';
+  const wave = style === 'wave';
+  const bullets = style === 'bullets';
   let message: string | null = null;
   if (!analysis) message = status ?? 'Load a song to play';
   else if (!isPlaying && !results) message = (engine?.position ?? 0) > 0.05 ? 'Paused' : 'Ready';
@@ -381,7 +396,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       />
 
       <div className={styles.hud}>
-        {shapes && (
+        {!bullets && (
           <div className={styles.stat}>
             <span className={styles.statLabel}>Health</span>
             <span ref={healthRef} className={`${styles.statValue} ${styles.health}`} />
@@ -425,7 +440,14 @@ export const Game = forwardRef<GameHandle, GameProps>(({
                 <button className={styles.primaryBtn} onClick={onTogglePlay}>
                   {message === 'Paused' ? 'Resume' : 'Start'}
                 </button>
-                {shapes ? (
+                {wave ? (
+                  <div className={styles.help}>
+                    <span>Hold <kbd>Space</kbd> / <kbd>W</kbd> / <kbd>Up</kbd> / click to fly up, let go to fly down</span>
+                    <span>Touch: hold anywhere</span>
+                    <span><kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
+                    <span>The level turns on the beat. Floor and ceiling are safe unless spiked; orbs on the turns score extra. Run out of health and the song rewinds to the last checkpoint.</span>
+                  </div>
+                ) : shapes ? (
                   <div className={styles.help}>
                     <span><kbd>Mouse</kbd> / <kbd>WASD</kbd> / <kbd>Arrows</kbd> move</span>
                     <span><kbd>Space</kbd> / <kbd>Shift</kbd> / <kbd>X</kbd> / click: dash (invulnerable while dashing)</span>
@@ -462,8 +484,8 @@ export const Game = forwardRef<GameHandle, GameProps>(({
             )}
             <div className={styles.resultRows}>
               <span>Hits taken</span><span>{results.hits}</span>
-              {shapes && <><span>Rewinds</span><span>{results.deaths}</span></>}
-              <span>{shapes ? 'Dash dodges' : 'Grazes'}</span><span>{results.grazes}</span>
+              {!bullets && <><span>Rewinds</span><span>{results.deaths}</span></>}
+              <span>{shapes ? 'Dash dodges' : wave ? 'Orbs' : 'Grazes'}</span><span>{results.grazes}</span>
               <span>Max combo</span><span>×{results.maxMult}</span>
             </div>
             <button className={styles.primaryBtn} onClick={onRestart}>Play again</button>

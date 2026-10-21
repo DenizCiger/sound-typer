@@ -36,7 +36,14 @@ Switch the toolbar toggle from **Type** to **Game** for a rhythm game generated 
 - You have a few health pips (more on Easy). Run out and the song rewinds to the last checkpoint (about every 30 s)
 - Dashes need to recharge (a ring around you fills back up), longer on harder difficulties
 
-In both styles, the score multiplier grows the longer you go without getting hit. At the end you get a grade and your best score for that song, style and difficulty. Seeking turns the run into a practice run that doesn't count.
+**Wave** (Geometry Dash wave style) — hold to fly up at a steep diagonal, let go to fly down, while the level scrolls by. The level is laid around a path that turns on the music's hits, so you click and release on the beat. Tight tunnels zigzag along it, spiked corridors have saws on the outside of the turns, block columns leave a gap where the path passes, mini sections make the wave smaller and twice as steep, and spam sections turn on every hit. Speed follows the song: it changes only where the music does (a drop, a breakdown, a build), across six speed stages from the calmest parts to the most intense, and the wave goes mini for the busiest drops. Changes are marked by portals, a FASTER/SLOWER callout and a color change (cool when slow, hot when fast; the meter in the corner shows the current stage). Orbs on the turns score extra.
+
+- **Fly up** — hold Space, W, Up or the mouse button (on touch: hold anywhere)
+- **Esc** or **P** — pause
+- Health and checkpoints work like in Shapes; after a hit you're put back on the path
+- Plain floors and ceilings are safe to slide along, spiked ones aren't
+
+In every style, the score multiplier grows the longer you go without getting hit. At the end you get a grade and your best score for that song, style and difficulty. Seeking turns the run into a practice run that doesn't count.
 
 ## How it works
 
@@ -54,7 +61,7 @@ Because the whole track is known in advance, playback just looks up features at 
 - **Visualizer** — spectrum on top; below it a timeline of the typing intensity and detected hits (bright ones shake), including a look-ahead past the playhead
 - **Settings** (gear icon):
   - **Typing** — Speed (characters per second at full volume), Dynamics (higher = quiet parts slower, loud parts stand out), Punch (how hard hits slam text in), Hits complete words, Whitespace handling
-  - **Game** — Style (Bullet hell / Shapes), Difficulty (Easy / Normal / Hard: density, speed, warning time, health)
+  - **Game** — Style (Bullet hell / Shapes / Wave), Difficulty (Easy / Normal / Hard: density, speed, warning time, timing window, health)
   - **Effects** — Screen shake on/off, shake strength and threshold, glow on hits (0 = off, up to 3x)
   - **Layout** — Text anchor (bottom or center), text width (ignored on phones)
   - **Reset to defaults**

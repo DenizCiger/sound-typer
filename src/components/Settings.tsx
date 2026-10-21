@@ -46,6 +46,7 @@ const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
 const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
   { value: 'bullets', label: 'Bullet hell' },
   { value: 'shapes', label: 'Shapes' },
+  { value: 'wave', label: 'Wave' },
 ];
 
 const WHITESPACE_OPTIONS: { value: WhitespaceMode; label: string }[] = [
@@ -232,7 +233,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
         <div className={styles.row}>
           <div className={styles.labelGroup}>
             <span className={styles.label}>Style</span>
-            <span className={styles.hint}>Dodge bullet patterns, or dash through shapes</span>
+            <span className={styles.hint}>Dodge bullet patterns, dash through shapes, or fly the wave</span>
           </div>
           <div className={styles.segmented}>
             {STYLE_OPTIONS.map((option) => (

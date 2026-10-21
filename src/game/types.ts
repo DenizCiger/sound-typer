@@ -1,6 +1,6 @@
 import type { Hit } from '../audio/driver';
 
-export type GameStyle = 'bullets' | 'shapes';
+export type GameStyle = 'bullets' | 'shapes' | 'wave';
 
 export interface GameInput {
   /** Keyboard direction, each -1..1. */
@@ -12,6 +12,8 @@ export interface GameInput {
   target: [number, number] | null;
   /** Dash pressed since the last frame (shapes). */
   dash: boolean;
+  /** Fly up (wave). */
+  hold: boolean;
 }
 
 export interface RunStats {
