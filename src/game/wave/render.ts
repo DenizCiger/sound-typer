@@ -9,6 +9,14 @@ import type { WaveSim, WaveStep } from './sim';
  * hot when fast, on the wall edges, spikes and saws, so a speed change shows at a glance.
  */
 const STAGE_COLORS = ['96, 165, 250', '45, 212, 191', '163, 230, 53', '250, 204, 21', '251, 146, 60', '244, 63, 94'];
+/**
+ * Zoom at the slowest and the fastest speed stage: in close while it crawls, out at speed so
+ * there's more of the level ahead to read.
+ */
+const ZOOM_SLOW = 1.4;
+const ZOOM_FAST = 0.75;
+/** The camera follows the wave up and down, keeping it this far from the view's edges at least. */
+const CAM_MARGIN = 0.22;
 const BG = '#09090b';
 const ARENA = '#0e0e11';
 const SOLID = '#1c1c21';
@@ -50,6 +58,11 @@ export class WaveRenderer {
   private time = 0;
   private intensity = 0;
   private zoom = 0;
+  /** Zoom from the speed stage, eased. */
+  private view = 1;
+  /** World y at the middle of the view. */
+  private camY = 50;
+  private camSet = false;
   private thump = 0;
   /** Stage color, eased so changes blend. */
   private color = STAGE_COLORS[2].split(',').map(Number);
@@ -67,6 +80,8 @@ export class WaveRenderer {
     this.flash = 0;
     this.pulse = 0;
     this.zoom = 0;
+    this.view = 1;
+    this.camSet = false;
     this.thump = 0;
     this.stage = -1;
     this.flip = null;
@@ -98,6 +113,13 @@ export class WaveRenderer {
     this.intensity += (target - this.intensity) * (1 - Math.exp(-dt / (target > this.intensity ? 0.08 : 0.35)));
 
     const sec = sectionAt(sim.chart, sim.position);
+    // Zoom follows the speed stage, eased so a speed portal reads as a camera move
+    const fast = (SPEED_STAGES[sec.stage] - SPEED_STAGES[0]) / (SPEED_STAGES[SPEED_STAGES.length - 1] - SPEED_STAGES[0]);
+    const view = 1 + (ZOOM_SLOW + (ZOOM_FAST - ZOOM_SLOW) * fast - 1) * fx.cameraZoom;
+    this.view += (view - this.view) * (1 - Math.exp(-dt / 0.5));
+    // The camera follows the wave up and down
+    if (!this.camSet || res.jumped) { this.camY = p.y; this.camSet = true; }
+    this.camY += (p.y - this.camY) * (1 - Math.exp(-dt / 0.35));
     if (sec.stage !== this.stage) {
       // Only announce changes the player flew through, not ones from seeking
       if (this.stage >= 0 && !res.jumped) {
@@ -143,8 +165,8 @@ export class WaveRenderer {
     this.toasts = this.toasts.filter((t) => t.age < 1.4);
     this.flash *= Math.exp(-dt / 0.2);
     this.pulse *= Math.exp(-dt / 0.15);
-    this.zoom *= Math.exp(-dt / 0.12);
     this.thump *= Math.exp(-dt / 0.2);
+    this.zoom *= Math.exp(-dt / 0.12);
     this.stageFlash *= Math.exp(-dt / 0.4);
     this.shake.step(dt);
   }
@@ -159,47 +181,49 @@ export class WaveRenderer {
     const { ctx, w, h, dpr } = c;
     const chart = sim.chart;
     const p = sim.player;
-    // Narrow screens shrink the arena so there's still enough of the level ahead in view
-    const u = Math.min(h / ARENA_H, w / 130);
-    const oy = (h - ARENA_H * u) / 2;
+    // Narrow screens shrink the view so there's still enough of the level ahead in it
+    const u = Math.min(h / ARENA_H, w / 130) * this.view;
     const camX = p.x - (w * PLAYER_AT) / u;
     const left = camX - 5, right = camX + w / u + 5;
+    // Never let the wave get too close to the top or bottom of the view
+    const half = h / 2 / u, keep = half * (1 - 2 * CAM_MARGIN);
+    this.camY = Math.min(p.y + keep, Math.max(p.y - keep, this.camY));
+    const top = this.camY - half - 10, bottom = this.camY + half + 10;
     const sx = (x: number) => (x - camX) * u;
-    const sy = (y: number) => oy + y * u;
+    const sy = (y: number) => h / 2 + (y - this.camY) * u;
     const col = this.rgb();
+    const z = 1 + this.zoom;
 
-    ctx.fillStyle = BG;
+    ctx.fillStyle = ARENA;
     ctx.fillRect(0, 0, w, h);
 
-    const z = 1 + this.zoom;
     ctx.save();
     ctx.translate(w * PLAYER_AT + this.shake.x, h / 2 + this.shake.y);
     ctx.scale(z, z);
     ctx.translate(-w * PLAYER_AT, -h / 2);
 
-    ctx.fillStyle = ARENA;
-    ctx.fillRect(-w, sy(0), w * 3, ARENA_H * u);
-    // Bass hits brighten the arena a touch
+    // Bass hits brighten the level a touch
     if (this.thump > 0.02) {
       ctx.fillStyle = `rgba(${INK}, ${0.035 * this.thump})`;
-      ctx.fillRect(-w, sy(0), w * 3, ARENA_H * u);
+      ctx.fillRect(-w, -h, w * 3, h * 3);
     }
 
     ctx.save();
-    ctx.beginPath();
-    ctx.rect(-w, sy(0), w * 3, ARENA_H * u);
-    ctx.clip();
 
-    // Background grid, scrolling at half speed
+    // Background grid, scrolling at half speed both ways
     ctx.strokeStyle = `rgba(${INK}, 0.035)`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     const gx0 = Math.floor((camX * PARALLAX) / GRID) * GRID;
     for (let gx = gx0; (gx - camX * PARALLAX) * u < w * 2; gx += GRID) {
       const x = (gx - camX * PARALLAX) * u;
-      ctx.moveTo(x, sy(0)); ctx.lineTo(x, sy(ARENA_H));
+      ctx.moveTo(x, -h); ctx.lineTo(x, h * 2);
     }
-    for (let gy = GRID; gy < ARENA_H; gy += GRID) { ctx.moveTo(-w, sy(gy)); ctx.lineTo(w * 2, sy(gy)); }
+    const gy0 = this.camY * PARALLAX - half * 2;
+    for (let gy = Math.floor(gy0 / GRID) * GRID; gy < this.camY * PARALLAX + half * 2; gy += GRID) {
+      const y = h / 2 + (gy - this.camY * PARALLAX) * u;
+      ctx.moveTo(-w, y); ctx.lineTo(w * 2, y);
+    }
     ctx.stroke();
 
     // Beat lines on the stronger hits, lighting up as the wave crosses them
@@ -207,7 +231,7 @@ export class WaveRenderer {
       const b = chart.beats[i];
       const near = Math.max(0, 1 - Math.abs(b.x - p.x) / 10);
       ctx.fillStyle = `rgba(${INK}, ${0.025 + 0.03 * b.s + 0.12 * near * near})`;
-      ctx.fillRect(sx(b.x) - 1, sy(0), 2, ARENA_H * u);
+      ctx.fillRect(sx(b.x) - 1, -h, 2, h * 3);
     }
 
     // Speed portals: a band in the new stage's color with chevrons pointing the way it goes
@@ -218,12 +242,12 @@ export class WaveRenderer {
       if (s.flip !== q.flip) {
         // Gravity portal: a white band with arrows pointing the way holding will fly from here
         ctx.fillStyle = `rgba(${INK}, 0.14)`;
-        ctx.fillRect(x - 3 * u, sy(0), 6 * u, ARENA_H * u);
+        ctx.fillRect(x - 3 * u, -h, 6 * u, h * 3);
         ctx.strokeStyle = `rgb(${INK})`;
         ctx.lineWidth = Math.max(2, 0.6 * u);
         const d = (s.flip ? 1 : -1) * 1.8 * u;
         for (let k = 0; k < 5; k++) {
-          const y = sy(10 + k * 20);
+          const y = h * (0.1 + k * 0.2);
           ctx.beginPath();
           ctx.moveTo(x - 1.8 * u, y - d / 2); ctx.lineTo(x, y + d / 2); ctx.lineTo(x + 1.8 * u, y - d / 2);
           ctx.stroke();
@@ -232,16 +256,16 @@ export class WaveRenderer {
       if (s.stage === q.stage && s.mini === q.mini) continue;
       const sc = STAGE_COLORS[s.stage];
       ctx.fillStyle = `rgba(${sc}, 0.18)`;
-      ctx.fillRect(x - 2 * u, sy(0), 4 * u, ARENA_H * u);
+      ctx.fillRect(x - 2 * u, -h, 4 * u, h * 3);
       ctx.fillStyle = `rgb(${sc})`;
-      ctx.fillRect(x - 0.3 * u, sy(0), 0.6 * u, ARENA_H * u);
+      ctx.fillRect(x - 0.3 * u, -h, 0.6 * u, h * 3);
       const n = Math.abs(s.stage - q.stage) || 1;
       const d = (s.stage >= q.stage ? 1 : -1) * 1.6 * u;
       ctx.strokeStyle = `rgb(${sc})`;
       ctx.lineWidth = Math.max(2, 0.6 * u);
       ctx.lineJoin = 'miter';
       for (let k = 0; k < 4; k++) {
-        const y = sy(12.5 + k * 25);
+        const y = h * (0.125 + k * 0.25);
         for (let j = 0; j < n; j++) {
           const cx = x + 4 * u + j * 2.2 * u;
           ctx.beginPath();
@@ -255,12 +279,12 @@ export class WaveRenderer {
     const i0 = Math.max(0, indexAtX(chart.xs, left) - 2);
     const i1 = Math.min(chart.xs.length - 1, indexAtX(chart.xs, right) + 2);
     const edge = 2 + 2 * this.pulse;
-    this.drawWall(ctx, chart, chart.top, i0, i1, -1, sx, sy, col, edge);
-    this.drawWall(ctx, chart, chart.bot, i0, i1, 1, sx, sy, col, edge);
+    this.drawWall(ctx, chart, chart.top, i0, i1, -1, sx, sy, col, edge, top - 20);
+    this.drawWall(ctx, chart, chart.bot, i0, i1, 1, sx, sy, col, edge, bottom + 20);
 
     for (const b of chart.blocks) {
       if (b.x1 < left || b.x0 > right) continue;
-      const y0 = Math.max(-2, b.y0), y1 = Math.min(ARENA_H + 2, b.y1);
+      const y0 = Math.max(top, b.y0), y1 = Math.min(bottom, b.y1);
       const x = sx(b.x0), y = sy(y0), bw = (b.x1 - b.x0) * u, bh = (y1 - y0) * u;
       ctx.fillStyle = SOLID;
       ctx.fillRect(x, y, bw, bh);
@@ -363,10 +387,10 @@ export class WaveRenderer {
     if (this.stageFlash > 0.01) {
       ctx.fillStyle = `rgba(${col}, ${0.6 * this.stageFlash})`;
       const t = 0.8 * u;
-      ctx.fillRect(0, oy, w, t);
-      ctx.fillRect(0, oy + ARENA_H * u - t, w, t);
+      ctx.fillRect(0, 0, w, t);
+      ctx.fillRect(0, h - t, w, t);
     }
-    this.drawSpeedMeter(ctx, w, oy, col);
+    this.drawSpeedMeter(ctx, w, col);
     const size = Math.round(Math.min(w, h) * 0.055);
     this.toasts.forEach((t, k) => {
       const a = Math.min(1, t.age / 0.1) * Math.min(1, (1.4 - t.age) / 0.4);
@@ -380,11 +404,11 @@ export class WaveRenderer {
   }
 
   /** Current speed stage, top right: one bar per stage, lit up to the current one. */
-  private drawSpeedMeter(ctx: CanvasRenderingContext2D, w: number, oy: number, col: string) {
+  private drawSpeedMeter(ctx: CanvasRenderingContext2D, w: number, col: string) {
     if (this.stage < 0) return;
     const bw = 6, gap = 3, bh = 14;
     const x0 = w - 16 - SPEED_STAGES.length * (bw + gap);
-    const y = Math.max(16, oy + 12);
+    const y = 16;
     for (let i = 0; i < SPEED_STAGES.length; i++) {
       const hh = bh * (0.4 + 0.6 * (i / (SPEED_STAGES.length - 1)));
       ctx.fillStyle = i <= this.stage ? `rgb(${col})` : `rgba(${INK}, 0.12)`;
@@ -409,9 +433,8 @@ export class WaveRenderer {
    */
   private drawWall(
     ctx: CanvasRenderingContext2D, chart: WaveChart, edge: Float32Array, i0: number, i1: number, side: number,
-    sx: (x: number) => number, sy: (y: number) => number, col: string, lineWidth: number,
+    sx: (x: number) => number, sy: (y: number) => number, col: string, lineWidth: number, far: number,
   ) {
-    const far = side < 0 ? -20 : ARENA_H + 20;
     const arc = this.arcLength(chart, edge);
     const pts: [number, number][] = [];
     // Depth into the solid at a distance along the edge: 0 at the tips, SPIKE_DEPTH in the valleys

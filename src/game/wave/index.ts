@@ -23,6 +23,7 @@ export class WaveGame implements GameEngine {
   get player() { return this.sim.player; }
   get health() { return { hp: this.sim.hp, max: this.sim.chart.maxHp }; }
   get checkpoints() { return this.sim.chart.checkpoints; }
+  readonly scale = 1;
 
   // The view scales itself to the canvas; the level doesn't depend on its size
   resize() {}

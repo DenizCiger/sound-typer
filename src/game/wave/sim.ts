@@ -1,7 +1,7 @@
 import type { TrackAnalysis } from '../../audio/analysis';
 import { intensityAt, sample } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
-import { ARENA_H, lowerBound, MINI_R, ORB_R, PLAYER_R, sampleAt, sectionAt, type WaveChart } from './chart';
+import { lowerBound, MINI_R, ORB_R, PLAYER_R, sampleAt, sectionAt, type WaveChart } from './chart';
 
 const INVULN = 1.2;
 const REWIND_GRACE = 2;
@@ -69,6 +69,7 @@ export class WaveSim {
   intensityAt(t: number) {
     return intensityAt(this.analysis, t);
   }
+
 
   takeRewind() {
     const r = this.pendingRewind;
@@ -150,7 +151,7 @@ export class WaveSim {
       p.dir = (input.hold ? -1 : 1) * (p.flip ? -1 : 1);
       const r = this.radius;
       p.x = sampleAt(c.xs, t);
-      p.y = Math.min(ARENA_H - r, Math.max(r, p.y + p.dir * p.vy * h));
+      p.y += p.dir * p.vy * h;
       p.invuln = Math.max(0, p.invuln - h);
 
       const orbs = c.orbs;

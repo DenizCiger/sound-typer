@@ -178,6 +178,59 @@ export class Shake {
   }
 }
 
+/** Samples per second of a precomputed play area scale curve. */
+export const ZOOM_RATE = 20;
+/** Long side of the screen-filling arena we plan for, against its short side of 100. */
+export const ARENA_ASPECT = 1.6;
+
+/**
+ * How much of the play area attacks cover, as shares of the screen-filling arena, split by how
+ * that share changes as the area scales by s: `fixed` (sized to the area, like lanes), `line`
+ * (spanning it, like bars and beams: share grows as 1/s) and `blob` (fixed size, like circles:
+ * share grows as 1/s²).
+ */
+export interface Coverage { fixed: number; line: number; blob: number }
+
+/**
+ * The play area scale at which attacks cover `target` of it, within [min, max]: the area grows
+ * when attacks pile up and shrinks around the few there are when it's calm.
+ */
+export function scaleFor(c: Coverage, target: number, min: number, max: number) {
+  const room = target - c.fixed;
+  if (room <= 0.02) return max;
+  const s = (c.line + Math.sqrt(c.line * c.line + 4 * room * c.blob)) / (2 * room);
+  return Math.min(max, Math.max(min, s));
+}
+
+/** Eases a scale toward its target: out quickly when attacks pile up, back in slowly. */
+export function easeScale(v: number, target: number, dt: number) {
+  return v + (target - v) * (1 - Math.exp(-dt / (target > v ? 0.3 : 2.5)));
+}
+
+/** Precomputes an eased scale curve from a target scale over song time. */
+export function zoomCurve(duration: number, target: (t: number) => number) {
+  const n = Math.ceil(duration * ZOOM_RATE) + 2;
+  const s = new Float32Array(n);
+  let v = target(0);
+  for (let i = 0; i < n; i++) {
+    v = easeScale(v, target(i / ZOOM_RATE), 1 / ZOOM_RATE);
+    s[i] = v;
+  }
+  return s;
+}
+
+/** Applies the zoom setting to a scale (0 keeps the area still), within sane bounds. */
+export function withAmount(s: number, amount: number) {
+  return Math.min(1.3, Math.max(0.35, 1 + (s - 1) * amount));
+}
+
+/** Play area scale at song time t from a precomputed curve, with the zoom setting applied. */
+export function zoomAt(curve: Float32Array, t: number, amount: number) {
+  const f = Math.min(curve.length - 1, Math.max(0, t * ZOOM_RATE));
+  const i = Math.floor(f), j = Math.min(curve.length - 1, i + 1);
+  return withAmount(curve[i] + (curve[j] - curve[i]) * (f - i), amount);
+}
+
 /** Sizes the canvas backing store to its CSS size and returns a context in CSS pixels. */
 export function prepareCanvas(canvas: HTMLCanvasElement) {
   const ctx = canvas.getContext('2d');

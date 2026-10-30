@@ -1,7 +1,7 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { intensityAt, sample } from '../common';
+import { intensityAt, sample, zoomAt } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
-import { distanceTo, geometry, PLAYER_SPEED, type ArenaInfo, type Hazard, type ShapesChart } from './chart';
+import { distanceTo, geometry, playArea, PLAYER_SPEED, type ArenaInfo, type Hazard, type ShapesChart } from './chart';
 
 export const PLAYER_SIZE = 2.6;
 const PLAYER_RADIUS = 1.0;
@@ -39,7 +39,9 @@ export class ShapesSim {
   width = 100;
   height = 100;
   active: Hazard[] = [];
-  arena: ArenaInfo = { w: 100, h: 100, targets: new Map() };
+  /** The zoom setting: how much the arena follows its scale curve (0 keeps it still). */
+  zoomAmount = 1;
+  arena: ArenaInfo = { w: 100, h: 100, scaleAt: (t) => zoomAt(this.chart.zoom, t, this.zoomAmount), targets: new Map() };
   player = { x: 50, y: 70, invuln: 0, dash: 0, cooldown: 0, dirX: 0, dirY: -1, vx: 0, vy: 0 };
   hp: number;
   stats: RunStats = newStats();
@@ -96,6 +98,11 @@ export class ShapesSim {
     return intensityAt(this.analysis, t);
   }
 
+  /** Arena scale right now: the camera shows exactly the play area. */
+  get scale() {
+    return this.arena.scaleAt(this.position);
+  }
+
   takeRewind() {
     const r = this.pendingRewind;
     this.pendingRewind = null;
@@ -103,7 +110,7 @@ export class ShapesSim {
   }
 
   private lockTarget(hz: Hazard) {
-    if ('target' in hz && hz.target) this.arena.targets.set(hz.id, [this.player.x / this.width, this.player.y / this.height]);
+    if ('target' in hz && hz.target) this.arena.targets.set(hz.id, [this.player.x, this.player.y]);
   }
 
   private resync(pos: number) {
@@ -155,9 +162,16 @@ export class ShapesSim {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
     }
+    this.keepInside();
+  }
+
+  /** The play area's edges push the player in as it shrinks. */
+  private keepInside() {
+    const p = this.player;
     const m = PLAYER_SIZE / 2;
-    p.x = Math.min(this.width - m, Math.max(m, p.x));
-    p.y = Math.min(this.height - m, Math.max(m, p.y));
+    const [ax, ay, aw, ah] = playArea(this.arena, this.position);
+    p.x = Math.min(ax + aw - m, Math.max(ax + m, p.x));
+    p.y = Math.min(ay + ah - m, Math.max(ay + m, p.y));
   }
 
   step(pos: number, dt: number, input: GameInput): ShapesStep {
@@ -177,6 +191,7 @@ export class ShapesSim {
       this.resync(pos);
       this.lastPos = pos;
       this.position = pos;
+      this.keepInside();
       return res;
     }
     // Waiting for the rewind to happen: freeze

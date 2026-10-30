@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { sectionIndexAt } from '../common';
+import { easeScale, intensityAt, scaleFor, sectionIndexAt, withAmount, type Coverage } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
 import { emitterPosition, type Chart, type ChartEvent } from './chart';
 
@@ -24,6 +24,14 @@ const MAX_BULLETS = 1500;
 const COMBO_STEP = 5; // seconds without a hit per multiplier step
 const MAX_MULT = 8;
 const LASER_WIDTH = 3.2;
+
+/** Play area scale bounds: 2.5x zoom when little is going on, out past the screen when it's packed. */
+const ZOOM_CALM = 0.4;
+const ZOOM_WIDE = 1.1;
+/** Share of the play area bullets (with room to dodge around each, overlaps counted twice) should cover. */
+const COVER = 0.5;
+/** Dodging room counted around each bullet, world units. */
+const BULLET_ROOM = 2;
 
 export interface Bullet {
   x: number;
@@ -79,6 +87,10 @@ export class GameSim {
   stats: RunStats = newStats();
   /** Audio position of the last step. */
   position = 0;
+  /** The zoom setting: how much the play area follows the music (0 keeps it still). */
+  zoomAmount = 1;
+  /** Play area scale, following how much of it the bullets cover. */
+  private areaScale = ZOOM_CALM;
 
   constructor(chart: Chart, analysis: TrackAnalysis) {
     this.chart = chart;
@@ -111,6 +123,16 @@ export class GameSim {
     this.position = 0;
     this.shotCursor = 0;
     this.laserCursor = 0;
+    this.areaScale = ZOOM_CALM;
+  }
+
+  /** The play area scale at which the bullets and lasers on screen cover COVER of it. */
+  private wantScale() {
+    const W = this.width, H = this.height;
+    const c: Coverage = { fixed: 0, line: 0, blob: 0 };
+    for (const b of this.bullets) c.blob += (Math.PI * (b.r + BULLET_ROOM) ** 2) / (W * H);
+    c.line = (this.activeLasers.length * LASER_WIDTH * Math.hypot(W, H)) / (W * H);
+    return scaleFor(c, COVER, ZOOM_CALM, ZOOM_WIDE);
   }
 
   /** World position of emitter `index` of the section playing at `t`, blended across section changes. */
@@ -127,7 +149,8 @@ export class GameSim {
       x = px + (x - px) * e;
       y = py + (y - py) * e;
     }
-    return [x * this.width, y * this.height];
+    const [ax, ay, aw, ah] = this.area();
+    return [ax + x * aw, ay + y * ah];
   }
 
   /** Emitters of the section at `t` (count). */
@@ -140,6 +163,21 @@ export class GameSim {
     for (let i = this.shotCursor; i < this.shots.length && this.shots[i].t <= this.position + window; i++) {
       if (this.shots[i].t > this.position) yield this.shots[i];
     }
+  }
+
+  intensityAt(t: number) {
+    return intensityAt(this.analysis, t);
+  }
+
+  /** Play area scale right now: the camera shows exactly the play area. */
+  get scale() {
+    return withAmount(this.areaScale, this.zoomAmount);
+  }
+
+  /** The play area: left, top, width, height in world units, scaled around the middle. */
+  area(): [number, number, number, number] {
+    const s = this.scale;
+    return [(this.width * (1 - s)) / 2, (this.height * (1 - s)) / 2, this.width * s, this.height * s];
   }
 
   levelAt(t: number) {
@@ -176,8 +214,15 @@ export class GameSim {
       const max = (input.focus ? POINTER_FOCUS_SPEED : POINTER_SPEED) * dt;
       if (dist <= max) { p.x = tx; p.y = ty; } else { p.x += (dx / dist) * max; p.y += (dy / dist) * max; }
     }
-    p.x = Math.min(this.width - 1, Math.max(1, p.x));
-    p.y = Math.min(this.height - 1, Math.max(1, p.y));
+    this.keepInside();
+  }
+
+  /** The play area's edges push the player in as it shrinks. */
+  private keepInside() {
+    const p = this.player;
+    const [ax, ay, aw, ah] = this.area();
+    p.x = Math.min(ax + aw - 1, Math.max(ax + 1, p.x));
+    p.y = Math.min(ay + ah - 1, Math.max(ay + 1, p.y));
   }
 
   private aimAt(x: number, y: number) {
@@ -256,6 +301,7 @@ export class GameSim {
       this.resync(pos);
       this.lastPos = pos;
       this.position = pos;
+      this.areaScale = this.wantScale();
       return res;
     }
     const adv = pos - this.lastPos;
@@ -267,8 +313,12 @@ export class GameSim {
     p.invuln = Math.max(0, p.invuln - adv);
 
     for (const b of this.bullets) this.advance(b, adv);
+    // Bullets live out to the widest the area gets, so they still count when it's small (or it
+    // would cull them, read as calm and close in further)
     const m = 8;
-    this.bullets = this.bullets.filter((b) => b.x > -m && b.x < this.width + m && b.y > -m && b.y < this.height + m);
+    const ax = (this.width * (1 - ZOOM_WIDE)) / 2, ay = (this.height * (1 - ZOOM_WIDE)) / 2;
+    const aw = this.width * ZOOM_WIDE, ah = this.height * ZOOM_WIDE;
+    this.bullets = this.bullets.filter((b) => b.x > ax - m && b.x < ax + aw + m && b.y > ay - m && b.y < ay + ah + m);
 
     while (this.shotCursor < this.shots.length && this.shots[this.shotCursor].t <= pos) {
       this.spawn(this.shots[this.shotCursor++], pos, res);
@@ -281,6 +331,8 @@ export class GameSim {
       this.activeLasers.push({ x, y, angle: this.aimAt(x, y), fire: e.t, warn: e.warn, duration: e.duration });
     }
     this.activeLasers = this.activeLasers.filter((l) => pos < l.fire + l.duration);
+    // The area grows as bullets pile up and closes back in around the few left
+    this.areaScale = easeScale(this.areaScale, this.wantScale(), adv);
 
     // ---- Collisions ----
     if (p.invuln <= 0) {

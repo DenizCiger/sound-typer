@@ -30,6 +30,7 @@ interface GameProps {
   screenshakeMultiplier: number;
   shakeThreshold: number;
   glowIntensity: number;
+  cameraZoom: number;
   onStyleChange: (style: GameStyle) => void;
   onTogglePlay: () => void;
   onRestart: () => void;
@@ -94,7 +95,7 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  analysis, trackName, status, isPlaying, style, difficulty, respawnDelay, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity,
+  analysis, trackName, status, isPlaying, style, difficulty, respawnDelay, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom,
   onStyleChange, onTogglePlay, onRestart, onSeek,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -138,10 +139,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   if (isPlaying && respawnUntil !== null) setRespawnUntil(null);
   const respawning = respawnUntil !== null;
 
-  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, focus: false });
+  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, focus: false });
   const propsRef = useRef({ engine, trackName, style, difficulty, respawnDelay, isPlaying, respawning, onTogglePlay, onSeek });
   useEffect(() => {
-    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity };
+    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom };
     propsRef.current = { engine, trackName, style, difficulty, respawnDelay, isPlaying, respawning, onTogglePlay, onSeek };
   });
 
@@ -150,7 +151,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     if (!canvas || !propsRef.current.engine) return null;
     const rect = canvas.getBoundingClientRect();
     const u = Math.min(rect.width, rect.height) / 100;
-    return [(clientX - rect.left) / u, (clientY - rect.top) / u];
+    // The camera fits the play area, which is scaled around the middle of the screen
+    const s = propsRef.current.engine.scale;
+    const cx = rect.width / 2, cy = rect.height / 2;
+    return [(cx + (clientX - rect.left - cx) * s) / u, (cy + (clientY - rect.top - cy) * s) / u];
   };
 
   const redraw = () => {
@@ -531,7 +535,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
                     <span>Hold <kbd>Space</kbd> / <kbd>W</kbd> / <kbd>Up</kbd> / click to fly up, let go to fly down</span>
                     <span>Touch: hold anywhere</span>
                     <span><kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>The level turns on the beat. Floor and ceiling are safe unless spiked; orbs on the turns score extra. Run out of health and the song rewinds to the last checkpoint.</span>
+                    <span>The level turns on the beat. Stay between the walls; orbs on the turns score extra. Run out of health and the song rewinds to the last checkpoint.</span>
                   </div>
                 ) : shapes ? (
                   <div className={styles.help}>

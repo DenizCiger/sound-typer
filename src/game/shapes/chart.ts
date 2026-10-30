@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { budgetWindow, buildSections, hitWeights, rng, sample, sectionIndexAt, seedFor, type BaseSection, type Difficulty } from '../common';
+import { ARENA_ASPECT, budgetWindow, buildSections, hitWeights, rng, sample, scaleFor, sectionIndexAt, seedFor, zoomCurve, ZOOM_RATE, type BaseSection, type Coverage, type Difficulty } from '../common';
 
 /**
  * Just Shapes & Beats style chart: big geometric hazards that show up as a faint warning,
@@ -18,7 +18,8 @@ import { budgetWindow, buildSections, hitWeights, rng, sample, sectionIndexAt, s
  * out of it, so a dash is never forced.
  *
  * Positions are normalized to the arena (0..1); sizes and speeds are in world units
- * (the arena's shorter side is 100).
+ * (the arena's shorter side is 100). The arena itself grows and shrinks around its centre with
+ * the music (`zoom`); a hazard is placed in the arena as it was when its warning started.
  */
 
 /** Player walking speed, world units per second. */
@@ -90,6 +91,8 @@ export interface ShapesChart {
   maxHp: number;
   /** Seconds after a dash ends before the next one. */
   dashCooldown: number;
+  /** Arena scale over the song (`zoomCurve`): attacks cover about the same share of it throughout. */
+  zoom: Float32Array;
 }
 
 interface Params {
@@ -156,6 +159,13 @@ const MAX_POP_RADIUS = 14;
 const SEEKER_RADIUS = 6;
 const TRAIL_RADIUS = 4.5;
 const TRAIL_STEP = 0.11;
+/** Arena scale bounds: 2.5x zoom when little is going on, out past the screen when it's packed. */
+const ZOOM_CALM = 0.4;
+const ZOOM_WIDE = 1.12;
+/** Share of the play area attacks (warnings included) should cover; the area scales to keep it. */
+const COVER = 0.3;
+/** No single hazard spans more than this share of the play area's short side. */
+const MAX_SPAN_SHARE = 0.4;
 /** Heft from which a big hit gets the heavy attacks (walls, ray bursts, rings of shots). */
 const HEAVY = 0.45;
 /** Heft from which bars slam a cross and pop-ups burst into a ring of shots. */
@@ -532,7 +542,38 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   }
 
   hazards.sort((x, y) => x.warn - y.warn);
-  return { sections, hazards, checkpoints, maxHp: p.hp, dashCooldown: p.dashCooldown };
+
+  // The arena is sized by how much of it the attacks cover: it shrinks around the few there
+  // are when it's calm and grows as they pile up, looking a little ahead so it's out in time
+  const n = Math.ceil(a.duration * ZOOM_RATE) + 2;
+  const cover: Coverage[] = Array.from({ length: n }, () => ({ fixed: 0, line: 0, blob: 0 }));
+  const biggest = new Float32Array(n);
+  const H = 100, W = 100 * ARENA_ASPECT;
+  for (const h of hazards) {
+    const c: Coverage = { fixed: 0, line: 0, blob: 0 };
+    const extent = h.kind === 'bomb' || h.kind === 'shot' ? h.r * 2 : h.kind === 'box' ? h.size * Math.SQRT2 : h.kind === 'bar' && !h.span ? h.width : 0;
+    switch (h.kind) {
+      case 'bomb': case 'shot': c.blob = (Math.PI * h.r * h.r) / (W * H); break;
+      case 'box': c.blob = (h.size * h.size) / (W * H); break;
+      case 'bar': if (h.span) c.fixed = h.span; else c.line = h.width / (h.axis === 'h' ? H : W); break;
+      case 'wall': c.line = h.width / (h.axis === 'h' ? H : W); break;
+      case 'beam': c.line = (h.width * Math.hypot(W, H)) / (W * H); break;
+    }
+    for (let i = Math.max(0, Math.floor(h.warn * ZOOM_RATE)); i < Math.min(n, Math.ceil(h.end * ZOOM_RATE)); i++) {
+      cover[i].fixed += c.fixed;
+      cover[i].line += c.line;
+      cover[i].blob += c.blob;
+      biggest[i] = Math.max(biggest[i], extent);
+    }
+  }
+  const want = cover.map((c, i) => Math.max(scaleFor(c, COVER, ZOOM_CALM, ZOOM_WIDE), Math.min(ZOOM_WIDE, biggest[i] / (100 * MAX_SPAN_SHARE))));
+  const zoom = zoomCurve(a.duration, (t) => {
+    const i = Math.round(t * ZOOM_RATE);
+    let m = 0;
+    for (let k = i; k <= Math.min(n - 1, i + ZOOM_RATE * 0.75); k++) m = Math.max(m, want[k]);
+    return m;
+  });
+  return { sections, hazards, checkpoints, maxHp: p.hp, dashCooldown: p.dashCooldown, zoom };
 }
 
 // ---- Geometry, shared by collisions and drawing ----
@@ -543,10 +584,19 @@ export type Geo =
   | { type: 'line'; x: number; y: number; angle: number; hw: number };
 
 export interface ArenaInfo {
+  /** The screen-filling arena; the play area is this scaled by `scaleAt` around its centre. */
   w: number;
   h: number;
-  /** Normalized player position locked in when a targeted hazard's warning started. */
+  /** Arena scale at a song time. */
+  scaleAt: (t: number) => number;
+  /** Player position (world units) locked in when a targeted hazard's warning started. */
   targets: Map<number, [number, number]>;
+}
+
+/** The play area at time t: left, top, width, height in world units. */
+export function playArea(arena: ArenaInfo, t: number): [number, number, number, number] {
+  const s = arena.scaleAt(t);
+  return [(arena.w * (1 - s)) / 2, (arena.h * (1 - s)) / 2, arena.w * s, arena.h * s];
 }
 
 /** Pop on the beat, then shrink away at the end. */
@@ -583,35 +633,38 @@ export function lastKick(hz: Hazard, t: number) {
 
 /** Shapes of a hazard at time t (during its warning they describe where it will be). */
 export function geometry(hz: Hazard, t: number, arena: ArenaInfo): Geo[] {
-  const { w, h } = arena;
+  // Normalized positions land in the play area as it was when the warning started
+  const [ax, ay, w, h] = playArea(arena, hz.warn);
+  const X = (n: number) => ax + n * w, Y = (n: number) => ay + n * h;
   const target = arena.targets.get(hz.id);
   const k = envelope(hz, t);
-  const big = Math.hypot(w, h);
+  const big = Math.hypot(arena.w, arena.h) * 2;
   switch (hz.kind) {
     case 'bomb': {
-      const [x, y] = hz.target && target ? target : [hz.x, hz.y];
-      return [{ type: 'circle', x: x * w, y: y * h, r: hz.r * k }];
+      const [x, y] = hz.target && target ? target : [X(hz.x), Y(hz.y)];
+      return [{ type: 'circle', x, y, r: hz.r * k }];
     }
     case 'box': {
       const rot = hz.rot + hz.spin * Math.max(0, t - hz.hit);
-      return [{ type: 'rect', x: hz.x * w, y: hz.y * h, hw: (hz.size / 2) * k, hh: (hz.size / 2) * k, rot }];
+      return [{ type: 'rect', x: X(hz.x), y: Y(hz.y), hw: (hz.size / 2) * k, hh: (hz.size / 2) * k, rot }];
     }
     case 'bar': {
-      const at = hz.target && target ? (hz.axis === 'h' ? target[1] : target[0]) : hz.at;
+      const at = hz.target && target ? (hz.axis === 'h' ? target[1] : target[0]) : hz.axis === 'h' ? Y(hz.at) : X(hz.at);
       const width = hz.span ? hz.span * (hz.axis === 'h' ? h : w) : hz.width;
       const half = (width / 2) * k;
       return hz.axis === 'h'
-        ? [{ type: 'rect', x: w / 2, y: at * h, hw: big, hh: half, rot: 0 }]
-        : [{ type: 'rect', x: at * w, y: h / 2, hw: half, hh: big, rot: 0 }];
+        ? [{ type: 'rect', x: ax + w / 2, y: at, hw: big, hh: half, rot: 0 }]
+        : [{ type: 'rect', x: at, y: ay + h / 2, hw: half, hh: big, rot: 0 }];
     }
     case 'wall': {
       const p = wallProgress(hz, t);
       const span = hz.axis === 'v' ? w : h; // direction of travel
       const across = hz.axis === 'v' ? h : w;
-      const from = -hz.width, to = span + hz.width;
+      const o = hz.axis === 'v' ? ax : ay, oa = hz.axis === 'v' ? ay : ax;
+      const from = o - hz.width, to = o + span + hz.width;
       const at = hz.from === 0 ? from + (to - from) * p : to - (to - from) * p;
-      const g0 = hz.gap * across - hz.gapSize / 2, g1 = hz.gap * across + hz.gapSize / 2;
-      const segs: [number, number][] = [[-10, g0], [g1, across + 10]];
+      const g0 = oa + hz.gap * across - hz.gapSize / 2, g1 = oa + hz.gap * across + hz.gapSize / 2;
+      const segs: [number, number][] = [[-big, g0], [g1, big]];
       return segs.map(([a, b]) => hz.axis === 'v'
         ? { type: 'rect' as const, x: at, y: (a + b) / 2, hw: hz.width / 2, hh: (b - a) / 2, rot: 0 }
         : { type: 'rect' as const, x: (a + b) / 2, y: at, hw: (b - a) / 2, hh: hz.width / 2, rot: 0 });
@@ -623,14 +676,16 @@ export function geometry(hz: Hazard, t: number, arena: ArenaInfo): Geo[] {
         const f = Math.min(x.length - 1, Math.max(0, (t - hz.hit) / step));
         const i = Math.min(x.length - 2, Math.floor(f)), u = Math.max(0, f - i);
         const lerp = (v: number[]) => v[i] + (v[i + 1] - v[i]) * u;
-        return [{ type: 'line', x: lerp(x) * w, y: lerp(y) * h, angle: lerp(a), hw: (hz.width / 2) * tail }];
+        // A section-long spinner's pivot follows the arena as it changes
+        const [px, py, pw, ph] = playArea(arena, t);
+        return [{ type: 'line', x: px + lerp(x) * pw, y: py + lerp(y) * ph, angle: lerp(a), hw: (hz.width / 2) * tail }];
       }
       const p = Math.min(1, Math.max(0, (t - hz.hit) / (hz.end - hz.hit)));
-      return [{ type: 'line', x: hz.x * w, y: hz.y * h, angle: hz.a0 + (hz.a1 - hz.a0) * p, hw: (hz.width / 2) * tail }];
+      return [{ type: 'line', x: X(hz.x), y: Y(hz.y), angle: hz.a0 + (hz.a1 - hz.a0) * p, hw: (hz.width / 2) * tail }];
     }
     case 'shot': {
       const d = Math.max(0, t - hz.hit) * hz.speed;
-      return [{ type: 'circle', x: hz.x * w + Math.cos(hz.angle) * d, y: hz.y * h + Math.sin(hz.angle) * d, r: hz.r }];
+      return [{ type: 'circle', x: X(hz.x) + Math.cos(hz.angle) * d, y: Y(hz.y) + Math.sin(hz.angle) * d, r: hz.r }];
     }
   }
 }

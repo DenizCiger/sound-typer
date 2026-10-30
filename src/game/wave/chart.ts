@@ -16,11 +16,15 @@ import { hitWeights, intensityAt, rng, sectionIndexAt, seedFor, type BaseSection
  * The level is static: world x is tied to song time (`xs`), so the simulation and renderer
  * just look things up at the current position and seeking needs no replay.
  *
- * Units: the arena is 100 units tall; x is in the same units.
+ * The level is open: no floor or ceiling, the walls are all there is, and the camera follows the
+ * wave up and down.
+ *
+ * Units: the view is 100 units tall at 1x zoom; x is in the same units.
  */
 
 /** Wall/path samples per second of song. */
 export const RATE = 120;
+/** Height of the view at 1x zoom. */
 export const ARENA_H = 100;
 /** Horizontal scroll speed at 1x, units per second. The wave's slope is 1 (mini: 2). */
 const H_SPEED = 72;
@@ -33,8 +37,8 @@ export const SPEED_STAGES = [0.6, 0.8, 1, 1.25, 1.55, 1.9];
 export const PLAYER_R = 1.1;
 export const MINI_R = 0.75;
 export const ORB_R = 3;
-/** The ideal path keeps this far from the floor and ceiling. */
-const PATH_BOUND = 6;
+/** With nothing to slide along, the path takes any hit after flying straight this long. */
+const MAX_STRAIGHT = 0.9;
 const PILLAR_W = 7;
 const CHECKPOINT_EVERY = 25;
 
@@ -396,7 +400,7 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     if (inBurst(t) && inBurst(next) && next - t < 0.6) cands.push({ t: (t + next) / 2, prom: 0, k: w.inten[h], s: 0 });
   }
   cands.sort((c1, c2) => c1.t - c2.t);
-  let lastTurn = -Infinity, slideSince = -1, hi = 0, si = 0, inten = 0;
+  let lastTurn = -Infinity, hi = 0, si = 0, inten = 0;
   for (let i = 0; i < n; i++) {
     const t = i * dt;
     while (si < sections.length - 1 && t >= sections[si + 1].start) {
@@ -415,12 +419,10 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
       // Against a slope the wave closes in on the wall faster, so sloped corridors get that much
       // more room to keep the stroke time the same both ways
       sFree = Math.max(SPAM_MIN_FREE, sec.vy * p.spamStroke * (sloped ? 1 + SPAM_SLOPE : 1)) / 2;
-      sc = Math.min(ARENA_H - PATH_BOUND - sFree, Math.max(PATH_BOUND + sFree, y));
+      sc = y;
     }
     if (spam) {
       sc += sSlope * dt;
-      // Bounce off the floor and ceiling
-      if (sc - sFree < PATH_BOUND + 4 || sc + sFree > ARENA_H - PATH_BOUND - 4) sSlope = -sSlope;
       // The path never swings out of the corridor: turn at its edge, beat or not
       if ((y - sc) * dir >= sFree - 1.5) {
         turns.push({ i, s: 0, prom: 0, dir, beat: false });
@@ -437,13 +439,12 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
       if (th - lastTurn < (spam ? p.spamGap : p.minGap * (2 - 1.1 * k))) continue;
       // In a spam corridor, every beat that keeps the wave around the centre line is a turn
       if (spam && (y - sc) * dir <= 0) continue;
-      // Sliding along the floor or ceiling gets boring: take the next hit, whatever it is
-      const sliding = slideSince >= 0 && th - slideSince > 0.25;
-      if (!sliding && !spam && prom < p.thrQuiet + (p.thrLoud - p.thrQuiet) * k) continue;
+      // A long straight stretch gets boring: take the next hit, whatever it is
+      const straight = th - lastTurn > MAX_STRAIGHT;
+      if (!straight && !spam && prom < p.thrQuiet + (p.thrLoud - p.thrQuiet) * k) continue;
       turns.push({ i, s, prom, dir, beat: true });
       dir = -dir;
       lastTurn = th;
-      slideSince = -1;
     }
     xs[i] = x;
     path[i] = y;
@@ -452,10 +453,6 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     // The tunnel breathes with the music: roomy when it's calm, tight when it's intense
     hws[i] = r0 + 2 * sec.vy * p.window * (1.3 - 0.5 * inten) * (sec.mini ? 0.85 : 1);
     y += dir * sec.vy * dt;
-    if (y < PATH_BOUND || y > ARENA_H - PATH_BOUND) {
-      y = Math.min(ARENA_H - PATH_BOUND, Math.max(PATH_BOUND, y));
-      if (slideSince < 0) slideSince = t;
-    }
     x += sec.speed * dt;
   }
 
@@ -493,8 +490,6 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
   }
 
   for (let i = 0; i < n; i++) {
-    top[i] = Math.max(-5, top[i]);
-    bot[i] = Math.min(ARENA_H + 5, bot[i]);
     // A wall never closes in faster than the wave can fly, so entering a tunnel from anywhere
     // (or a narrowing one) can always be survived
     if (i > 0) {
@@ -519,8 +514,8 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     const cx = xs[i];
     let cy = path[i] + side * (R + clear);
     for (let k = 0; k < 40 && clearance(cx, cy, R + clear + 2) < R + clear; k++) cy += side;
-    // Mostly off screen: pointless
-    if (cy + R * 0.6 < 0 || cy - R * 0.6 > ARENA_H) return;
+    // Buried deep in the wall: pointless
+    if (Math.abs(cy - path[i]) - R > hws[i] * p.loose * 2) return;
     saws.push({ x: cx, y: cy, r: R });
   };
   let lastSaw = -Infinity;
@@ -559,8 +554,8 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     // Heavier hits close the gap in a bit
     const gap = hws[i] * p.pillarGap * (1.15 - 0.25 * w.heft[k]);
     // Only the part sticking out of the spiked walls matters
-    if (lo - gap > top[i] + 2) blocks.push({ x0, x1, y0: -10, y1: lo - gap });
-    if (hi2 + gap < bot[i] - 2) blocks.push({ x0, x1, y0: hi2 + gap, y1: ARENA_H + 10 });
+    if (lo - gap > top[i] + 2) blocks.push({ x0, x1, y0: top[i] - 10, y1: lo - gap });
+    if (hi2 + gap < bot[i] - 2) blocks.push({ x0, x1, y0: hi2 + gap, y1: bot[i] + 10 });
   }
 
   const orbs: Orb[] = turns.filter((turn) => turn.beat).map((turn) => ({ t: turn.i * dt, x: xs[turn.i], y: path[turn.i] }));

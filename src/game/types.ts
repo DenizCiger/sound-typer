@@ -37,6 +37,8 @@ export interface EffectSettings {
   screenshakeMultiplier: number;
   shakeThreshold: number;
   glowIntensity: number;
+  /** How much the play area grows and shrinks with the music; 0 keeps it still. */
+  cameraZoom: number;
   /** Focus held: draw the hitbox brighter. */
   focus: boolean;
 }
@@ -55,6 +57,11 @@ export interface GameEngine {
   readonly health: { hp: number; max: number } | null;
   /** Song positions the player rewinds to (starting with 0), for the progress bar; null without checkpoints. */
   readonly checkpoints: readonly number[] | null;
+  /**
+   * Size of the play area against the screen-filling arena (it grows and shrinks with the music
+   * around its centre; the camera always shows exactly the play area). 1 for a fixed arena.
+   */
+  readonly scale: number;
   resize(w: number, h: number): void;
   /** Back to the start of a fresh run. */
   reset(): void;

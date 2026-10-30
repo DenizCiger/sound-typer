@@ -1,7 +1,7 @@
 import type { Hit } from '../../audio/driver';
 import { prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
-import { geometry, lastKick, type Geo, type Hazard } from './chart';
+import { geometry, lastKick, playArea, type Geo, type Hazard } from './chart';
 import { PLAYER_SIZE, type ShapesSim, type ShapesStep } from './sim';
 
 const BG = '#0b0a10';
@@ -141,8 +141,8 @@ export class ShapesRenderer {
     this.toasts = this.toasts.filter((t) => t.age < 1.4);
     this.flash *= Math.exp(-dt / 0.2);
     this.pulse *= Math.exp(-dt / 0.15);
-    this.zoom *= Math.exp(-dt / 0.12);
     this.thump *= Math.exp(-dt / 0.2);
+    this.zoom *= Math.exp(-dt / 0.12);
     this.shake.step(dt);
   }
 
@@ -160,7 +160,8 @@ export class ShapesRenderer {
       if (hz.kind === 'shot') {
         const g = geos[0];
         if (g.type !== 'circle') return;
-        const x = Math.min(sim.width - 2, Math.max(2, g.x)) * u, y = Math.min(sim.height - 2, Math.max(2, g.y)) * u;
+        const [ax, ay, aw, ah] = playArea(sim.arena, pos);
+        const x = Math.min(ax + aw - 2, Math.max(ax + 2, g.x)) * u, y = Math.min(ay + ah - 2, Math.max(ay + 2, g.y)) * u;
         ctx.beginPath();
         ctx.arc(x, y, (2 + 3 * (1 - k)) * u, 0, Math.PI * 2);
         ctx.strokeStyle = `rgba(${PINK}, ${0.3 + 0.5 * k})`;
@@ -198,19 +199,20 @@ export class ShapesRenderer {
 
   /** A wall telegraphs as a strip on the edge it comes from, with its gap left open. */
   private drawWallWarning(ctx: CanvasRenderingContext2D, hz: Extract<Hazard, { kind: 'wall' }>, sim: ShapesSim, u: number, k: number) {
-    const W = sim.width * u, H = sim.height * u;
-    const across = hz.axis === 'v' ? sim.height : sim.width;
+    const [ax, ay, aw, ah] = playArea(sim.arena, hz.warn);
+    const X = ax * u, Y = ay * u, W = aw * u, H = ah * u;
+    const across = hz.axis === 'v' ? ah : aw;
     const g0 = (hz.gap * across - hz.gapSize / 2) * u, g1 = (hz.gap * across + hz.gapSize / 2) * u;
     const depth = 1.5 * u;
     ctx.fillStyle = `rgba(${PINK}, ${0.2 + 0.6 * k})`;
     if (hz.axis === 'v') {
-      const x = hz.from === 0 ? 0 : W - depth;
-      ctx.fillRect(x, 0, depth, g0);
-      ctx.fillRect(x, g1, depth, H - g1);
+      const x = hz.from === 0 ? X : X + W - depth;
+      ctx.fillRect(x, Y, depth, g0);
+      ctx.fillRect(x, Y + g1, depth, H - g1);
     } else {
-      const y = hz.from === 0 ? 0 : H - depth;
-      ctx.fillRect(0, y, g0, depth);
-      ctx.fillRect(g1, y, W - g1, depth);
+      const y = hz.from === 0 ? Y : Y + H - depth;
+      ctx.fillRect(X, y, g0, depth);
+      ctx.fillRect(X + g1, y, W - g1, depth);
     }
   }
 
@@ -265,10 +267,17 @@ export class ShapesRenderer {
     }
     ctx.restore();
 
+    // The camera always shows exactly the play area, which grows and shrinks with the music
+    const scale = sim.scale;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(1 / scale, 1 / scale);
+    ctx.translate(-w / 2, -h / 2);
+    const [ax, ay, aw, ah] = playArea(sim.arena, sim.position);
+
     // Arena border glows with the loudness
     ctx.strokeStyle = `rgba(${PINK}, ${0.08 + 0.35 * level * level + 0.3 * this.pulse})`;
     ctx.lineWidth = 2 + 6 * inten * (0.5 + this.pulse);
-    ctx.strokeRect(0, 0, sim.width * u, sim.height * u);
+    ctx.strokeRect(ax * u, ay * u, aw * u, ah * u);
 
     // Warnings under solids
     for (const hz of sim.active) if (sim.position < hz.hit) this.drawHazard(ctx, hz, sim, u, reach, fx);

@@ -23,6 +23,7 @@ export class ShapesGame implements GameEngine {
   get player() { return this.sim.player; }
   get health() { return { hp: this.sim.hp, max: this.sim.chart.maxHp }; }
   get checkpoints() { return this.sim.chart.checkpoints; }
+  get scale() { return this.sim.scale; }
 
   resize(w: number, h: number) { this.sim.resize(w, h); }
 
@@ -32,6 +33,7 @@ export class ShapesGame implements GameEngine {
   }
 
   step(pos: number, dt: number, input: GameInput, hits: Hit[], fx: EffectSettings) {
+    this.sim.zoomAmount = fx.cameraZoom;
     const res = this.sim.step(pos, dt, input);
     this.renderer.update(this.sim, res, hits, dt, fx);
   }

@@ -17,7 +17,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'type', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5 };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'type', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5 };
 
 interface Prefs extends FeelPrefs {
   volume: number;
@@ -286,6 +286,7 @@ export default function App() {
           screenshakeMultiplier={settings.screenshakeMultiplier}
           shakeThreshold={prefs.shakeThreshold}
           glowIntensity={settings.glowIntensity}
+          cameraZoom={settings.cameraZoom}
           onStyleChange={handleGameStyle}
           onTogglePlay={handleTogglePlay}
           onRestart={handleRestart}

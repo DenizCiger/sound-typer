@@ -12,6 +12,8 @@ export interface SettingsState {
   screenshakeMultiplier: number;
   /** 0 disables the glow. */
   glowIntensity: number;
+  /** Camera zoom with the music in game mode; 0 keeps the camera still. */
+  cameraZoom: number;
   snapToWords: boolean;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
@@ -319,6 +321,16 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
           value={settings.glowIntensity}
           format={(v) => (v === 0 ? 'Off' : formatMultiplier(v))}
           onChange={(v) => onChange({ ...settings, glowIntensity: v })}
+        />
+        <SliderRow
+          label="Camera zoom"
+          hint="Game: in close when calm, out when it gets busy"
+          min={0}
+          max={2}
+          step={0.25}
+          value={settings.cameraZoom}
+          format={(v) => (v === 0 ? 'Off' : formatMultiplier(v))}
+          onChange={(v) => onChange({ ...settings, cameraZoom: v })}
         />
 
         <div className={styles.section}>Layout</div>

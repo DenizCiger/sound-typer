@@ -139,6 +139,12 @@ export class GameRenderer {
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, w, h);
     ctx.translate(this.shake.x, this.shake.y);
+    // The camera always shows exactly the play area, which grows and shrinks with the music
+    const z = 1 / sim.scale;
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(z, z);
+    ctx.translate(-w / 2, -h / 2);
+    const [ax, ay, aw, ah] = sim.area();
 
     // ---- Background grid, scrolling with the loudness ----
     const cell = 10 * u;
@@ -146,9 +152,16 @@ export class GameRenderer {
     ctx.lineWidth = 1;
     ctx.beginPath();
     const off = (this.scroll * u) % cell;
-    for (let y = off - cell; y < h + cell; y += cell) { ctx.moveTo(-20, y); ctx.lineTo(w + 20, y); }
-    for (let x = (w / 2) % cell - cell; x < w + cell; x += cell) { ctx.moveTo(x, -20); ctx.lineTo(x, h + 20); }
+    // Wide enough for the zoomed-out play area
+    const gx0 = ax * u - cell, gx1 = (ax + aw) * u + cell, gy0 = ay * u - cell, gy1 = (ay + ah) * u + cell;
+    for (let y = off + Math.floor((gy0 - off) / cell) * cell; y < gy1; y += cell) { ctx.moveTo(gx0, y); ctx.lineTo(gx1, y); }
+    const ox = (w / 2) % cell;
+    for (let x = ox + Math.floor((gx0 - ox) / cell) * cell; x < gx1; x += cell) { ctx.moveTo(x, gy0); ctx.lineTo(x, gy1); }
     ctx.stroke();
+    // The play area's edge, so its growing and shrinking reads
+    ctx.strokeStyle = `rgba(255, 255, 255, ${0.08 + 0.1 * Math.min(1, this.pulse)})`;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(ax * u, ay * u, aw * u, ah * u);
 
     // ---- Shockwaves from big patterns ----
     for (const wv of this.waves) {
