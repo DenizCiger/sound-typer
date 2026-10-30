@@ -108,6 +108,11 @@ interface Params {
   dashCooldown: number;
   /** Rotating beams per spinner section. */
   beams: number;
+  /**
+   * Seconds between a lane going away and the next one going solid in a steps march, so the
+   * player can always step back over the march instead of being forced to dash.
+   */
+  stepSlack: number;
   /** Walls may start once the previous one is this far through its sweep. */
   wallSpacing: number;
   /** Shot volleys on weak hits outside rain sections. */
@@ -117,9 +122,9 @@ interface Params {
 }
 
 const PARAMS: Record<Difficulty, Params> = {
-  easy: { lead: 0.8, reaction: 0.4, budget: 3.5, hp: 6, gapSize: 26, speed: 0.9, shotMin: 0.4, bigAt: 0.72, targetRatio: 0.25, pops: 3, seekerGap: 1.4, dashCooldown: 0.3, beams: 1, wallSpacing: 0.8, volleys: false, idleMax: 2 },
-  normal: { lead: 0.6, reaction: 0.3, budget: 5.5, hp: 4, gapSize: 20, speed: 1.05, shotMin: 0.25, bigAt: 0.65, targetRatio: 0.4, pops: 5, seekerGap: 0.9, dashCooldown: 0.5, beams: 2, wallSpacing: 0.6, volleys: true, idleMax: 1.2 },
-  hard: { lead: 0.42, reaction: 0.2, budget: 8, hp: 3, gapSize: 16, speed: 1.2, shotMin: 0.15, bigAt: 0.58, targetRatio: 0.5, pops: 7, seekerGap: 0.65, dashCooldown: 0.7, beams: 2, wallSpacing: 0.45, volleys: true, idleMax: 0.8 },
+  easy: { lead: 0.85, reaction: 0.4, budget: 3.5, hp: 6, gapSize: 26, speed: 0.9, shotMin: 0.4, bigAt: 0.72, targetRatio: 0.25, pops: 3, seekerGap: 1.4, dashCooldown: 0.2, stepSlack: 0.3, beams: 1, wallSpacing: 0.8, volleys: false, idleMax: 2 },
+  normal: { lead: 0.68, reaction: 0.32, budget: 5.5, hp: 4, gapSize: 20, speed: 1.0, shotMin: 0.25, bigAt: 0.65, targetRatio: 0.4, pops: 5, seekerGap: 0.9, dashCooldown: 0.25, stepSlack: 0.22, beams: 2, wallSpacing: 0.65, volleys: true, idleMax: 1.2 },
+  hard: { lead: 0.55, reaction: 0.27, budget: 7, hp: 3, gapSize: 18, speed: 1.1, shotMin: 0.15, bigAt: 0.58, targetRatio: 0.45, pops: 6, seekerGap: 0.75, dashCooldown: 0.3, stepSlack: 0.16, beams: 2, wallSpacing: 0.55, volleys: true, idleMax: 0.8 },
 };
 
 const COST: Record<Hazard['kind'], number> = { shot: 0.25, bomb: 0.8, box: 0.8, bar: 1, wall: 2, beam: 0 };
@@ -127,6 +132,10 @@ const CHECKPOINT_EVERY = 25;
 const CALM_THEMES: Theme[] = ['field', 'rain', 'steps'];
 const ALL_THEMES: Theme[] = ['field', 'bars', 'steps', 'walls', 'spinner', 'rain'];
 const STEP_LANES = 8;
+/** How long a steps lane stays solid. */
+const STEP_LIFE = 0.4;
+/** Full bars of one axis alive at once may cover at most this many world units of the arena. */
+const BAR_COVER = 30;
 const MAX_POP_RADIUS = 14;
 const SEEKER_RADIUS = 6;
 const TRAIL_RADIUS = 4.5;
@@ -307,9 +316,25 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     }
   };
 
+  // ---- Full bars: never pile up so much of the arena that there's nowhere left to stand ----
+  const bars: { axis: 'h' | 'v'; at: number | null; width: number; warn: number; end: number }[] = [];
   const fullBar = (t: number, s: number, axis: 'h' | 'v', target: boolean, extra = 1) => {
     const width = 5 + 7 * s;
-    push({ kind: 'bar', warn: warnFor(t, width / 2, extra), hit: t, end: t + 0.45, axis, at: spot(), width, target });
+    const warn = warnFor(t, width / 2, extra), end = t + 0.45;
+    // Dense hits would otherwise fill half the screen within a second: count every bar on the
+    // same axis that's warning or solid at any point while this one is
+    const live = bars.filter((b) => b.axis === axis && b.end > warn && b.warn < end);
+    if (live.reduce((sum, b) => sum + b.width, width) > BAR_COVER) return false;
+    // Best of a few spots: the one furthest from the other bars, leaving lanes between them
+    let at = spot(), best = -1;
+    for (let k = 0; k < 4; k++) {
+      const c = spot();
+      const d = live.reduce((m, b) => (b.at === null ? m : Math.min(m, Math.abs(b.at - c))), 2);
+      if (d > best) { best = d; at = c; }
+    }
+    bars.push({ axis, at: target ? null : at, width, warn, end });
+    push({ kind: 'bar', warn, hit: t, end, axis, at, width, target });
+    return true;
   };
 
   let alt = 0;
@@ -318,6 +343,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   let lastAxis: 'h' | 'v' = 'v';
   let lastFrom: 0 | 1 = 0;
   let step = 0, stepDir = 1;
+  let lastStep = -Infinity;
   let stepAxis: 'h' | 'v' = 'v';
   let secIndex = -1;
 
@@ -349,8 +375,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
     switch (sec.theme) {
       case 'field':
-        if (big && left >= COST.bar) fullBar(t, s, alt++ % 2 ? 'h' : 'v', r() < p.targetRatio);
-        else if (mid) { if (low < 0.35 || !seeker(t)) pop(t, s, false); }
+        if (big && left >= COST.bar && fullBar(t, s, alt++ % 2 ? 'h' : 'v', r() < p.targetRatio)) break;
+        if (mid) { if (low < 0.35 || !seeker(t)) pop(t, s, false); }
         else if (difficulty !== 'easy') trailBomb(t);
         break;
 
@@ -359,17 +385,21 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
         if (left < COST.bar) break;
         {
           const axis = alt++ % 2 ? 'h' : 'v';
-          fullBar(t, s, axis, big && r() < p.targetRatio, big ? 1.1 : 1);
           // The biggest hits slam a cross
-          if (difficulty !== 'easy' && s >= 0.88 && left >= COST.bar * 2) fullBar(t, s, axis === 'h' ? 'v' : 'h', false, 1.1);
+          if (fullBar(t, s, axis, big && r() < p.targetRatio, big ? 1.1 : 1) && difficulty !== 'easy' && s >= 0.88 && left >= COST.bar * 2) {
+            fullBar(t, s, axis === 'h' ? 'v' : 'h', false, 1.1);
+          }
         }
         break;
 
       case 'steps': {
         if (weak) { if (p.volleys) volley(t, s); break; }
-        if (left < COST.bar) break;
+        // A lane only goes solid once the previous one is gone (plus some slack): the march
+        // can't turn into a solid block the player has to dash through when hits come in a burst
+        if (left < COST.bar || t - lastStep < STEP_LIFE + p.stepSlack) break;
+        lastStep = t;
         const span = 1 / STEP_LANES;
-        push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + 0.5, axis: stepAxis, at: (step + 0.5) * span, width: 0, span: span * 0.92, target: false });
+        push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + STEP_LIFE, axis: stepAxis, at: (step + 0.5) * span, width: 0, span: span * 0.92, target: false });
         step += stepDir;
         if (step < 0 || step >= STEP_LANES) {
           // Bounce back from the edge, turning the march around

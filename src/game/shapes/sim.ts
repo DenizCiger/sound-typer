@@ -6,10 +6,10 @@ import { distanceTo, geometry, PLAYER_SPEED, type ArenaInfo, type Hazard, type S
 export const PLAYER_SIZE = 2.6;
 const PLAYER_RADIUS = 1.0;
 const POINTER_SPEED = 90;
-const DASH_TIME = 0.15;
-const DASH_SPEED = 190;
+const DASH_TIME = 0.1;
+const DASH_SPEED = 185;
 /** Invulnerability after the dash itself, so threading through a bar isn't frame perfect. */
-const DASH_GRACE = 0.05;
+const DASH_GRACE = 0.06;
 const INVULN = 1.5;
 const REWIND_GRACE = 2;
 const MAX_CATCHUP = 0.25;

@@ -208,3 +208,30 @@
     min-height: 40px;
   }
 }
+
+.respawn {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.countdown {
+  font-size: 56px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  opacity: 0.85;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.6);
+}
+
+.respawnLabel {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}

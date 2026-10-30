@@ -20,6 +20,8 @@ export interface SettingsState {
   mode: AppMode;
   difficulty: Difficulty;
   gameStyle: GameStyle;
+  /** Seconds the song stays paused on the checkpoint after running out of health. */
+  respawnDelay: number;
 }
 
 /** How the music maps to typing. Stored separately from layout settings. */
@@ -264,6 +266,17 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
             ))}
           </div>
         </div>
+
+        <SliderRow
+          label="Respawn timer"
+          hint="Pause on the checkpoint after a rewind (Shapes, Wave)"
+          min={0}
+          max={5}
+          step={0.5}
+          value={settings.respawnDelay}
+          format={(v) => (v === 0 ? 'Instant' : `${v}s`)}
+          onChange={(v) => onChange({ ...settings, respawnDelay: v })}
+        />
 
         <div className={styles.section}>Effects</div>
         <div className={styles.row}>

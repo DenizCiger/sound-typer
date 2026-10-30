@@ -17,7 +17,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'type', difficulty: 'normal', gameStyle: 'bullets' };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'type', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5 };
 
 interface Prefs extends FeelPrefs {
   volume: number;
@@ -236,7 +236,8 @@ export default function App() {
 
     const now = performance.now();
     if (now - lastUiUpdateRef.current >= 250) {
-      setPlaybackPos(pos);
+      // Read again: a checkpoint rewind during the frame may have moved it
+      setPlaybackPos(engine.getPosition());
       lastUiUpdateRef.current = now;
     }
   }, [engine, prefs.maxCps, prefs.dynamics, prefs.punch, drawVisualizer, settings.mode]);
@@ -280,6 +281,7 @@ export default function App() {
           isPlaying={isPlaying}
           style={settings.gameStyle}
           difficulty={settings.difficulty}
+          respawnDelay={settings.respawnDelay}
           screenshake={settings.screenshake}
           screenshakeMultiplier={settings.screenshakeMultiplier}
           shakeThreshold={prefs.shakeThreshold}

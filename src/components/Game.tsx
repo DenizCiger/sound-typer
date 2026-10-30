@@ -24,6 +24,8 @@ interface GameProps {
   isPlaying: boolean;
   style: GameStyle;
   difficulty: Difficulty;
+  /** Seconds to wait on the checkpoint after a rewind before the song resumes. */
+  respawnDelay: number;
   screenshake: boolean;
   screenshakeMultiplier: number;
   shakeThreshold: number;
@@ -50,6 +52,7 @@ interface Results {
 const SCORES_KEY = 'sound-typer-scores';
 // Only used for hit detection, the typing speed doesn't matter here
 const HIT_PARAMS: DriverParams = { maxCps: 0, dynamics: 1, punch: 0 };
+const NO_INPUT: GameInput = { dx: 0, dy: 0, focus: false, target: null, dash: false, hold: false };
 const TAP_MS = 200;
 const MOUSE_TAKEOVER_PX = 12;
 
@@ -91,7 +94,7 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  analysis, trackName, status, isPlaying, style, difficulty, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity,
+  analysis, trackName, status, isPlaying, style, difficulty, respawnDelay, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity,
   onStyleChange, onTogglePlay, onRestart, onSeek,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -115,6 +118,9 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   const finishedRef = useRef(false);
   const [results, setResults] = useState<Results | null>(null);
   const [practice, setPractice] = useState(false);
+  /** performance.now() when the respawn countdown ends and the song resumes; null when not respawning. */
+  const [respawnUntil, setRespawnUntil] = useState<number | null>(null);
+  const countdownRef = useRef<HTMLDivElement>(null);
 
   const engine = useMemo(() => (analysis ? createEngine(style, analysis, difficulty) : null), [analysis, style, difficulty]);
   const hitDriver = useMemo(() => (analysis ? new TypingDriver(analysis) : null), [analysis]);
@@ -125,13 +131,17 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     setPrevEngine(engine);
     setResults(null);
     setPractice(false);
+    setRespawnUntil(null);
   }
+  // Resumed by hand during the countdown
+  if (isPlaying && respawnUntil !== null) setRespawnUntil(null);
+  const respawning = respawnUntil !== null;
 
   const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, focus: false });
-  const propsRef = useRef({ engine, trackName, style, difficulty, isPlaying, onTogglePlay, onSeek });
+  const propsRef = useRef({ engine, trackName, style, difficulty, respawnDelay, isPlaying, respawning, onTogglePlay, onSeek });
   useEffect(() => {
     fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity };
-    propsRef.current = { engine, trackName, style, difficulty, isPlaying, onTogglePlay, onSeek };
+    propsRef.current = { engine, trackName, style, difficulty, respawnDelay, isPlaying, respawning, onTogglePlay, onSeek };
   });
 
   const toWorld = (clientX: number, clientY: number): [number, number] | null => {
@@ -188,6 +198,8 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       if (isTyping(e)) return;
       const p = propsRef.current;
       const shapes = p.style === 'shapes';
+      // The respawn countdown counts as playing, so dashing or flying doesn't resume early
+      const live = p.isPlaying || p.respawning;
       if (e.code === 'Space') {
         e.preventDefault();
         // Otherwise a focused button would also get "clicked" by the space key
@@ -195,15 +207,16 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       }
       if (e.code === 'KeyP' || (e.code === 'Escape' && !document.querySelector('[aria-modal="true"]'))) {
         if (p.isPlaying && !e.repeat) p.onTogglePlay();
+        else if (p.respawning) setRespawnUntil(null);
         return;
       }
       // Space dashes in Shapes while playing, otherwise it's play/pause
-      if (shapes && p.isPlaying && DASH_KEYS.has(e.code)) {
+      if (shapes && live && DASH_KEYS.has(e.code)) {
         if (!e.repeat) dashRef.current = true;
         return;
       }
       // The wave flies up while one of these is held
-      if (p.style === 'wave' && p.isPlaying && HOLD_KEYS.has(e.code)) {
+      if (p.style === 'wave' && live && HOLD_KEYS.has(e.code)) {
         e.preventDefault();
         keysRef.current.add(e.code);
         return;
@@ -256,6 +269,31 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: p.target, dash, hold };
   };
 
+  // Respawn countdown: the song is paused on the checkpoint; the player can already move
+  // (the rewind grace keeps them safe) and the effects keep animating
+  useEffect(() => {
+    if (respawnUntil === null) return;
+    let raf = 0;
+    let last = performance.now();
+    const tick = (now: number) => {
+      const p = propsRef.current;
+      const left = respawnUntil - now;
+      if (left <= 0) {
+        setRespawnUntil(null);
+        if (!p.isPlaying) p.onTogglePlay();
+        return;
+      }
+      if (p.engine) p.engine.step(p.engine.position, Math.max(0, now - last) / 1000, readInput(), [], fxRef.current);
+      last = now;
+      if (countdownRef.current) countdownRef.current.textContent = String(Math.ceil(left / 1000));
+      redraw();
+      updateHud();
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [respawnUntil]);
+
   useImperativeHandle(ref, () => ({
     frame(pos: number, dt: number) {
       const e = propsRef.current.engine;
@@ -266,7 +304,18 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       const hits = hitDriver?.step(pos, dt, HIT_PARAMS).hits ?? [];
       e.step(pos, dt, input, hits, fxRef.current);
       const rewind = e.takeRewind();
-      if (rewind !== null) propsRef.current.onSeek(rewind);
+      if (rewind !== null) {
+        const p = propsRef.current;
+        if (p.respawnDelay > 0) {
+          // Pause first so the seek lands exactly on the checkpoint, then show it right away
+          p.onTogglePlay();
+          p.onSeek(rewind);
+          e.step(rewind, 0, NO_INPUT, [], fxRef.current);
+          setRespawnUntil(performance.now() + p.respawnDelay * 1000);
+        } else {
+          p.onSeek(rewind);
+        }
+      }
       redraw();
       updateHud();
       if (e.stats.practice !== practice) setPractice(e.stats.practice);
@@ -380,10 +429,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   const bullets = style === 'bullets';
   let message: string | null = null;
   if (!analysis) message = status ?? 'Load a song to play';
-  else if (!isPlaying && !results) message = (engine?.position ?? 0) > 0.05 ? 'Paused' : 'Ready';
+  else if (!isPlaying && !results && !respawning) message = (engine?.position ?? 0) > 0.05 ? 'Paused' : 'Ready';
 
   return (
-    <div className={`${styles.outer} ${isPlaying ? styles.playing : ''}`}>
+    <div className={`${styles.outer} ${isPlaying || respawning ? styles.playing : ''}`}>
       <canvas
         ref={canvasRef}
         className={styles.canvas}
@@ -416,6 +465,13 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         </div>
         {practice && <span className={styles.practice}>Practice</span>}
       </div>
+
+      {respawning && (
+        <div className={styles.respawn}>
+          <div ref={countdownRef} className={styles.countdown}>{Math.ceil(respawnDelay)}</div>
+          <div className={styles.respawnLabel}>Respawning</div>
+        </div>
+      )}
 
       {message && (
         <div className={styles.overlay}>
