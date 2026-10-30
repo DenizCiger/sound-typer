@@ -54,6 +54,7 @@ export class WaveRenderer {
   /** Stage color, eased so changes blend. */
   private color = STAGE_COLORS[2].split(',').map(Number);
   private stage = -1;
+  private flip: boolean | null = null;
   /** Flash of the new stage's color on a speed change. */
   private stageFlash = 0;
   private arcs = new WeakMap<Float32Array, Float32Array>();
@@ -68,6 +69,7 @@ export class WaveRenderer {
     this.zoom = 0;
     this.thump = 0;
     this.stage = -1;
+    this.flip = null;
     this.stageFlash = 0;
   }
 
@@ -104,6 +106,13 @@ export class WaveRenderer {
         this.stageFlash = 1;
       }
       this.stage = sec.stage;
+    }
+    if (sec.flip !== this.flip) {
+      if (this.flip !== null && !res.jumped) {
+        this.toasts.push({ text: sec.flip ? 'GRAVITY FLIP' : 'GRAVITY BACK', color: INK, age: 0 });
+        this.stageFlash = 1;
+      }
+      this.flip = sec.flip;
     }
     const want = STAGE_COLORS[sec.stage].split(',').map(Number);
     for (let i = 0; i < 3; i++) this.color[i] += (want[i] - this.color[i]) * (1 - Math.exp(-dt / 0.15));
@@ -204,8 +213,23 @@ export class WaveRenderer {
     // Speed portals: a band in the new stage's color with chevrons pointing the way it goes
     for (let i = 1; i < chart.sections.length; i++) {
       const s = chart.sections[i], q = chart.sections[i - 1];
-      if (s.x0 < left - 10 || s.x0 > right || (s.stage === q.stage && s.mini === q.mini)) continue;
+      if (s.x0 < left - 10 || s.x0 > right) continue;
       const x = sx(s.x0);
+      if (s.flip !== q.flip) {
+        // Gravity portal: a white band with arrows pointing the way holding will fly from here
+        ctx.fillStyle = `rgba(${INK}, 0.14)`;
+        ctx.fillRect(x - 3 * u, sy(0), 6 * u, ARENA_H * u);
+        ctx.strokeStyle = `rgb(${INK})`;
+        ctx.lineWidth = Math.max(2, 0.6 * u);
+        const d = (s.flip ? 1 : -1) * 1.8 * u;
+        for (let k = 0; k < 5; k++) {
+          const y = sy(10 + k * 20);
+          ctx.beginPath();
+          ctx.moveTo(x - 1.8 * u, y - d / 2); ctx.lineTo(x, y + d / 2); ctx.lineTo(x + 1.8 * u, y - d / 2);
+          ctx.stroke();
+        }
+      }
+      if (s.stage === q.stage && s.mini === q.mini) continue;
       const sc = STAGE_COLORS[s.stage];
       ctx.fillStyle = `rgba(${sc}, 0.18)`;
       ctx.fillRect(x - 2 * u, sy(0), 4 * u, ARENA_H * u);

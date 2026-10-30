@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { intensityAt, rng, sectionIndexAt, seedFor, type BaseSection, type Difficulty } from '../common';
+import { hitWeights, intensityAt, rng, sectionIndexAt, seedFor, type BaseSection, type Difficulty } from '../common';
 
 /**
  * Geometry Dash wave style chart. Holding flies the wave up at a fixed slope, releasing flies
@@ -7,6 +7,11 @@ import { intensityAt, rng, sectionIndexAt, seedFor, type BaseSection, type Diffi
  * that turns on the music's hits, then builds everything around it with clearance: tunnels
  * that follow the path, saws on the outside of its turns, block columns with a gap where it
  * passes. Following the path is always possible, so every crash is the player's.
+ *
+ * Hits are weighed like in Shapes: how much a hit stands out (`prom`) decides whether the path
+ * turns on it, so a quiet intro still zigzags to its bumps, and how hard it lands (`heft`) sizes
+ * what it brings: teeth bitten out of the walls at the turn, saws, tighter pillar gaps. Calm parts
+ * fly long lazy sweeps through roomy tunnels, intense parts turn often in tight ones.
  *
  * The level is static: world x is tied to song time (`xs`), so the simulation and renderer
  * just look things up at the current position and seeking needs no replay.
@@ -44,6 +49,8 @@ export interface WaveSection extends BaseSection {
   /** Vertical speed, units per second. */
   vy: number;
   mini: boolean;
+  /** Gravity flipped: holding flies down and letting go flies up. */
+  flip: boolean;
   /** World x where the section starts. */
   x0: number;
 }
@@ -84,7 +91,16 @@ interface Params {
   window: number;
   /** Shortest time between turns. */
   minGap: number;
-  /** Hit strength needed to turn, in quiet and in intense parts. */
+  /** Shortest time between turns in spam sections, which turn on every hit and double time in between. */
+  spamGap: number;
+  /**
+   * Longest you can fly one way in a spam corridor, seconds: its height. Staying inside takes at
+   * least 1 / (2 · spamStroke) taps per second (fewer at slow speeds, where SPAM_MIN_FREE wins).
+   */
+  spamStroke: number;
+  /** Share of song parts (after the first) played with gravity flipped. */
+  flips: number;
+  /** Hit prominence needed to turn, in quiet and in intense parts. */
   thrQuiet: number;
   thrLoud: number;
   hp: number;
@@ -95,7 +111,7 @@ interface Params {
   sawClear: number;
   /** Saw spacing in saw sections, seconds. */
   sawGap: number;
-  /** Hit strength and spacing for the saws buried in tunnel walls. */
+  /** Hit prominence and spacing for the saws buried in tunnel walls. */
   tunnelSawAt: number;
   tunnelSawGap: number;
   /** Pillar gap, in tunnel half heights. */
@@ -104,21 +120,24 @@ interface Params {
 
 const PARAMS: Record<Difficulty, Params> = {
   easy: {
-    stages: [0, 3], window: 0.11, minGap: 0.28, thrQuiet: 0.7, thrLoud: 0.4, hp: 5, mini: false,
-    loose: 2.2, sawClear: 0.9, sawGap: 0.45, tunnelSawAt: 0.85, tunnelSawGap: 0.8, pillarGap: 1.2,
+    stages: [0, 3], window: 0.11, minGap: 0.28, spamGap: 0.16, spamStroke: 0.34, flips: 0, thrQuiet: 0.8, thrLoud: 0.55, hp: 5, mini: false,
+    loose: 2.2, sawClear: 0.9, sawGap: 0.45, tunnelSawAt: 0.9, tunnelSawGap: 0.8, pillarGap: 1.2,
   },
   normal: {
-    stages: [0, 4], window: 0.06, minGap: 0.16, thrQuiet: 0.55, thrLoud: 0.25, hp: 4, mini: true,
-    loose: 1.7, sawClear: 0.8, sawGap: 0.3, tunnelSawAt: 0.75, tunnelSawGap: 0.6, pillarGap: 1.1,
+    stages: [0, 4], window: 0.06, minGap: 0.16, spamGap: 0.09, spamStroke: 0.25, flips: 0.2, thrQuiet: 0.7, thrLoud: 0.4, hp: 4, mini: true,
+    loose: 1.7, sawClear: 0.8, sawGap: 0.3, tunnelSawAt: 0.8, tunnelSawGap: 0.6, pillarGap: 1.1,
   },
   hard: {
-    stages: [1, 5], window: 0.04, minGap: 0.1, thrQuiet: 0.45, thrLoud: 0.12, hp: 3, mini: true,
-    loose: 1.35, sawClear: 0.7, sawGap: 0.18, tunnelSawAt: 0.6, tunnelSawGap: 0.35, pillarGap: 1,
+    stages: [1, 5], window: 0.04, minGap: 0.1, spamGap: 0.07, spamStroke: 0.19, flips: 0.28, thrQuiet: 0.6, thrLoud: 0.25, hp: 3, mini: true,
+    loose: 1.35, sawClear: 0.7, sawGap: 0.18, tunnelSawAt: 0.7, tunnelSawGap: 0.35, pillarGap: 1,
   },
 };
 
 const THEMES: WaveTheme[] = ['tunnel', 'saws', 'pillars'];
-/** Spam: a narrow tunnel turning on every hit, only in the most intense parts. */
+/**
+ * Spam: a straight (sometimes gently sloped) corridor barely taller than the wave's swing, so
+ * staying inside takes rapid tapping; for the busiest intense parts.
+ */
 const LOUD_THEMES: WaveTheme[] = ['tunnel', 'saws', 'pillars', 'spam'];
 
 /** Intensity bins for finding the song's structure. */
@@ -126,11 +145,24 @@ const BIN = 0.5;
 /** Shortest part of the song with its own speed, in bins. */
 const PART_MIN = 8;
 /** Cost of another part, against the squared error of fitting the intensity with flat parts. */
-const PART_COST = 0.15;
+const PART_COST = 0.1;
 /** Neighbouring parts closer than this in intensity are one part. */
 const PART_MERGE = 0.07;
 /** Parts longer than this get split (at strong hits) so the obstacles change now and then. */
 const SECTION_MAX = 16;
+/** How far a part boundary may move to land on the music's sharpest change, seconds. */
+const EDGE_REACH = 2.5;
+/** Window either side of a candidate boundary that the change is measured over. */
+const EDGE_WINDOW = 0.6;
+/** Spam comes in bursts: corridors this long, seconds, with a tunnel this long in between. */
+const SPAM_LEN = 3.5;
+const SPAM_BREAK = 2.5;
+/** Slope of sloped spam corridors, as a share of the wave's vertical speed. */
+const SPAM_SLOPE = 0.2;
+/** Room a spam corridor leaves for the wave to swing in at least, world units (slow speed stages). */
+const SPAM_MIN_FREE = 14;
+/** Heft from which a turn bites a tooth out of the outside wall. */
+const TOOTH_AT = 0.3;
 
 interface Part { start: number; end: number; inten: number; rate: number }
 
@@ -177,9 +209,29 @@ function songParts(a: TrackAnalysis): Part[] {
     } else k++;
   }
 
+  // The fit only knows half-second bins of a smoothed curve, so a boundary can sit a second or
+  // two off the drop: move it to where the intensity changes most sharply the right way, then
+  // onto the hit right there
+  const STEP = 0.05;
+  const fine = new Float64Array(Math.ceil(a.duration / STEP) + 2);
+  for (let k = 1; k < fine.length; k++) fine[k] = fine[k - 1] + intensityAt(a, (k - 1) * STEP);
+  const avg = (t0: number, t1: number) => {
+    const i = Math.max(0, Math.min(fine.length - 1, Math.round(t0 / STEP)));
+    const j = Math.max(0, Math.min(fine.length - 1, Math.round(t1 / STEP)));
+    return j > i ? (fine[j] - fine[i]) / (j - i) : 0;
+  };
   const bounds = ranges.map(([c]) => c * BIN);
   bounds.push(a.duration);
-  for (let k = 1; k < bounds.length - 1; k++) bounds[k] = snapToHit(a, bounds[k], 1);
+  for (let k = 1; k < bounds.length - 1; k++) {
+    const dir = Math.sign(mean(ranges[k][0], ranges[k][1]) - mean(ranges[k - 1][0], ranges[k - 1][1]));
+    const lo = Math.max(bounds[k - 1] + 2, bounds[k] - EDGE_REACH), hi = Math.min(bounds[k + 1] - 2, bounds[k] + EDGE_REACH);
+    let best = bounds[k], score = -Infinity;
+    for (let t = lo; t <= hi; t += STEP) {
+      const sc = dir * (avg(t, t + EDGE_WINDOW) - avg(t - EDGE_WINDOW, t)) - 0.01 * Math.abs(t - bounds[k]);
+      if (sc > score) { score = sc; best = t; }
+    }
+    bounds[k] = snapToHit(a, best, 0.35);
+  }
   return ranges.map(([i, j], k) => {
     const start = bounds[k], end = bounds[k + 1];
     let hits = 0;
@@ -229,6 +281,7 @@ export function sectionAt(chart: WaveChart, t: number) {
 export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveChart {
   const p = PARAMS[difficulty];
   const r = rng(seedFor(a) ^ 0x3a7e);
+  const w = hitWeights(a);
   const parts = songParts(a);
   // Song-relative scale: this song's calmest part gets the slowest stage and its most intense
   // the fastest, but with a minimum range, so a song that barely changes doesn't swing wildly
@@ -237,15 +290,38 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
   const rates = parts.map((q) => q.rate).sort((x, y) => x - y);
   const busy = rates[Math.floor(rates.length * 0.75)];
 
-  const sections: WaveSection[] = [];
-  let prev: WaveTheme | null = null;
-  for (const part of parts) {
+  const staged = parts.map((part) => {
     const level = Math.min(1, (part.inten - low) / range);
     const [lo, hi] = p.stages;
-    const stage = Math.round(lo + level * (hi - lo));
-    const speed = H_SPEED * SPEED_STAGES[stage];
     // The wave goes mini for the intense parts that are also the busiest: the drops
     const mini = p.mini && level >= 0.75 && part.rate >= busy && part.end - part.start >= 4;
+    return { ...part, level, mini, stage: Math.round(lo + level * (hi - lo)) };
+  });
+  // Neighbours that ended up with the same speed are one part, so there's no portal for nothing
+  for (let k = 0; k + 1 < staged.length;) {
+    const q = staged[k], q2 = staged[k + 1];
+    if (q.stage === q2.stage && q.mini === q2.mini) {
+      const len = q.end - q.start, len2 = q2.end - q2.start;
+      staged[k] = { ...q, end: q2.end, level: (q.level * len + q2.level * len2) / (len + len2), inten: (q.inten * len + q2.inten * len2) / (len + len2) };
+      staged.splice(k + 1, 1);
+    } else k++;
+  }
+
+  // Gravity portals: some parts are played upside down (never two in a row, not in the first
+  // 20 s), preferably the ones that start with a jump in intensity, so the flip lands on a drop
+  const flips = staged.map((part, k) => {
+    if (k === 0 || part.start < 20 || part.end - part.start < 6) return false;
+    const jump = Math.abs(part.level - staged[k - 1].level);
+    return r() < p.flips * (0.6 + 1.2 * jump);
+  });
+  for (let k = 1; k < flips.length; k++) if (flips[k - 1]) flips[k] = false;
+
+  const sections: WaveSection[] = [];
+  let prev: WaveTheme | null = null;
+  for (const [pk, part] of staged.entries()) {
+    const { level, mini, stage } = part;
+    const flip = flips[pk];
+    const speed = H_SPEED * SPEED_STAGES[stage];
     // Long parts change obstacles now and then, at a strong hit; the speed stays
     const cuts = [part.start];
     while (part.end - cuts[cuts.length - 1] > SECTION_MAX) {
@@ -255,10 +331,25 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     }
     cuts.push(part.end);
     for (let k = 0; k + 1 < cuts.length; k++) {
-      const pool = (level >= 0.75 && !mini ? LOUD_THEMES : THEMES).filter((t) => t !== prev);
-      const theme = pool[Math.floor(r() * pool.length)];
+      const pool = (level >= 0.6 && !mini ? LOUD_THEMES : THEMES).filter((t) => t !== prev);
+      // The obstacles follow the music's character: bassy parts get pillars slamming in on the
+      // kicks, accented ones saws, dense ones spam, steady ones tunnels; the dice only lean
+      let n = 0, heavy = 0, bass = 0;
+      for (let h = 0; h < a.onsetTimes.length; h++) {
+        if (a.onsetTimes[h] < cuts[k] || a.onsetTimes[h] >= cuts[k + 1] || w.prom[h] < 0.45) continue;
+        n++;
+        if (w.heft[h] >= 0.55) heavy++;
+        if (a.onsetLowness[h] > 0.5) bass++;
+      }
+      const rate = n / Math.max(1, cuts[k + 1] - cuts[k]);
+      const weight = (t: WaveTheme) => t === 'tunnel' ? 0.6 + (1 - level)
+        : t === 'saws' ? 0.4 + 2 * (n ? heavy / n : 0)
+        : t === 'pillars' ? 0.4 + 2 * (n ? bass / n : 0)
+        : rate >= 2.5 ? 1.5 + (rate - 2.5) : 0;
+      let roll = r() * pool.reduce((sum, t) => sum + weight(t), 0);
+      const theme = pool.find((t) => (roll -= weight(t)) < 0) ?? pool[0];
       prev = theme;
-      sections.push({ start: cuts[k], end: cuts[k + 1], energy: part.inten, theme, stage, speed, vy: speed * (mini ? 2 : 1), mini, x0: 0 });
+      sections.push({ start: cuts[k], end: cuts[k + 1], energy: part.inten, theme, stage, speed, vy: speed * (mini ? 2 : 1), mini, flip, x0: 0 });
     }
   }
 
@@ -271,9 +362,40 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
   const n = Math.ceil(a.duration * RATE) + 1;
   const xs = new Float32Array(n), path = new Float32Array(n), hws = new Float32Array(n);
   const secOf = new Uint16Array(n);
-  const turns: { i: number; s: number; dir: number }[] = [];
+  /**
+   * `s` is the hit's heft; `dir` the way the wave was flying into the turn (its outside); `beat`
+   * is false for the turns a spam corridor forces off the beat.
+   */
+  const turns: { i: number; s: number; prom: number; dir: number; beat: boolean }[] = [];
+  /** Spam corridors: centre line and half height per sample (NaN outside them). */
+  const spamC = new Float32Array(n).fill(NaN), spamH = new Float32Array(n);
+  // The corridor of the spam section being laid: centre, its slope, and how far the path may swing
+  let sc = 50, sSlope = 0, sFree = 0, spamSec = -1, bi = 0;
   const dt = 1 / RATE;
   let y = 50, dir = 1, x = 0;
+  // Spam sections come in bursts: a corridor for a few seconds (ending on a strong hit), then a
+  // breather as a plain tunnel, and so on
+  const bursts: [number, number][] = [];
+  for (const sec of sections) {
+    if (sec.theme !== 'spam') continue;
+    for (let s0 = sec.start; sec.end - s0 >= 2;) {
+      const s1 = Math.min(sec.end, snapToHit(a, s0 + SPAM_LEN, 0.5));
+      bursts.push([s0, s1]);
+      s0 = snapToHit(a, s1 + SPAM_BREAK, 0.5);
+    }
+  }
+  const inBurst = (t: number) => bursts.some(([s0, s1]) => t >= s0 && t < s1);
+  // Where the path may turn: the hits, plus in spam bursts a turn halfway between hits that are
+  // far enough apart (double time), to keep the ideal path near the corridor's centre line
+  const cands: { t: number; prom: number; k: number; s: number }[] = [];
+  for (let h = 0; h < a.onsetTimes.length; h++) {
+    const t = a.onsetTimes[h];
+    cands.push({ t, prom: w.prom[h], k: w.inten[h], s: w.heft[h] });
+    const next = a.onsetTimes[h + 1];
+    if (next === undefined || next - t < 2 * p.spamGap) continue;
+    if (inBurst(t) && inBurst(next) && next - t < 0.6) cands.push({ t: (t + next) / 2, prom: 0, k: w.inten[h], s: 0 });
+  }
+  cands.sort((c1, c2) => c1.t - c2.t);
   let lastTurn = -Infinity, slideSince = -1, hi = 0, si = 0, inten = 0;
   for (let i = 0; i < n; i++) {
     const t = i * dt;
@@ -282,18 +404,43 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
       sections[si].x0 = x;
     }
     const sec = sections[si];
+    while (bi < bursts.length && t >= bursts[bi][1]) bi++;
+    const spam = bi < bursts.length && t >= bursts[bi][0];
+    const r0 = sec.mini ? MINI_R : PLAYER_R;
+    if (spam && spamSec !== bi) {
+      // A new corridor, straight or gently sloped, only as tall as one short stroke of the wave
+      spamSec = bi;
+      const sloped = r() < 0.4;
+      sSlope = sloped ? (r() < 0.5 ? -1 : 1) * SPAM_SLOPE * sec.vy : 0;
+      // Against a slope the wave closes in on the wall faster, so sloped corridors get that much
+      // more room to keep the stroke time the same both ways
+      sFree = Math.max(SPAM_MIN_FREE, sec.vy * p.spamStroke * (sloped ? 1 + SPAM_SLOPE : 1)) / 2;
+      sc = Math.min(ARENA_H - PATH_BOUND - sFree, Math.max(PATH_BOUND + sFree, y));
+    }
+    if (spam) {
+      sc += sSlope * dt;
+      // Bounce off the floor and ceiling
+      if (sc - sFree < PATH_BOUND + 4 || sc + sFree > ARENA_H - PATH_BOUND - 4) sSlope = -sSlope;
+      // The path never swings out of the corridor: turn at its edge, beat or not
+      if ((y - sc) * dir >= sFree - 1.5) {
+        turns.push({ i, s: 0, prom: 0, dir, beat: false });
+        dir = -dir;
+        lastTurn = t;
+      }
+    }
     const target = intensityAt(a, t);
     inten += (target - inten) * (1 - Math.exp(-dt / 0.3));
-    while (hi < a.onsetTimes.length && a.onsetTimes[hi] <= t) {
-      const th = a.onsetTimes[hi], s = a.onsetStrength[hi];
+    while (hi < cands.length && cands[hi].t <= t) {
+      const { t: th, prom, k, s } = cands[hi];
       hi++;
-      const k = intensityAt(a, th);
-      const spam = sections[si].theme === 'spam';
-      if (th - lastTurn < p.minGap * (spam ? 0.85 : 1.4 - 0.5 * k)) continue;
+      // Calm parts take their time (long sweeps), intense ones turn as fast as the music does
+      if (th - lastTurn < (spam ? p.spamGap : p.minGap * (2 - 1.1 * k))) continue;
+      // In a spam corridor, every beat that keeps the wave around the centre line is a turn
+      if (spam && (y - sc) * dir <= 0) continue;
       // Sliding along the floor or ceiling gets boring: take the next hit, whatever it is
       const sliding = slideSince >= 0 && th - slideSince > 0.25;
-      if (!sliding && !spam && (k < 0.08 || s < p.thrQuiet + (p.thrLoud - p.thrQuiet) * k)) continue;
-      turns.push({ i, s, dir });
+      if (!sliding && !spam && prom < p.thrQuiet + (p.thrLoud - p.thrQuiet) * k) continue;
+      turns.push({ i, s, prom, dir, beat: true });
       dir = -dir;
       lastTurn = th;
       slideSince = -1;
@@ -301,8 +448,9 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     xs[i] = x;
     path[i] = y;
     secOf[i] = si;
-    const r0 = sec.mini ? MINI_R : PLAYER_R;
-    hws[i] = r0 + 2 * sec.vy * p.window * (1.15 - 0.3 * inten) * (sec.mini || sec.theme === 'spam' ? 0.85 : 1);
+    if (spam) { spamC[i] = sc; spamH[i] = sFree + r0; }
+    // The tunnel breathes with the music: roomy when it's calm, tight when it's intense
+    hws[i] = r0 + 2 * sec.vy * p.window * (1.3 - 0.5 * inten) * (sec.mini ? 0.85 : 1);
     y += dir * sec.vy * dt;
     if (y < PATH_BOUND || y > ARENA_H - PATH_BOUND) {
       y = Math.min(ARENA_H - PATH_BOUND, Math.max(PATH_BOUND, y));
@@ -320,12 +468,37 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     top[i] = path[i] - hw * (loose ? p.loose : 1);
     bot[i] = path[i] + hw * (loose ? p.loose : 1);
     if (loose) spiky[i] = 1;
+    // Spam corridors are straight, whatever the path does inside them
+    if (!Number.isNaN(spamC[i])) { top[i] = spamC[i] - spamH[i]; bot[i] = spamC[i] + spamH[i]; }
+  }
+
+  // Teeth: the heavier turns bite into the outside wall right where the wave turns, so the walls
+  // hit back on the beat. A tooth keeps three quarters of the timing window's slack at the turn
+  // (roomy sections have plenty more to bite into), and heavier hits bite deeper and wider
+  for (const turn of turns) {
+    const sec = sections[secOf[turn.i]];
+    if (turn.s < TOOTH_AT || sec.theme === 'spam') continue;
+    const r0 = sec.mini ? MINI_R : PLAYER_R;
+    const edge = turn.dir > 0 ? bot : top;
+    const room = Math.abs(edge[turn.i] - path[turn.i]) - (r0 + 2 * sec.vy * p.window * 0.75);
+    const depth = Math.min(room, 2 + 10 * (turn.s - TOOTH_AT) / (1 - TOOTH_AT));
+    if (depth < 1) continue;
+    const half = 2 + 4 * turn.s;
+    const cx = xs[turn.i];
+    for (let j = indexAtX(xs, cx - half); j < n && xs[j] <= cx + half; j++) {
+      const d = depth * (1 - Math.abs(xs[j] - cx) / half);
+      if (turn.dir > 0) bot[j] = Math.min(bot[j], bot[turn.i] - d);
+      else top[j] = Math.max(top[j], top[turn.i] + d);
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
     top[i] = Math.max(-5, top[i]);
     bot[i] = Math.min(ARENA_H + 5, bot[i]);
     // A wall never closes in faster than the wave can fly, so entering a tunnel from anywhere
     // (or a narrowing one) can always be survived
     if (i > 0) {
-      const rate = sec.vy * dt * 1.001 + 1e-3;
+      const rate = sections[secOf[i]].vy * dt * 1.001 + 1e-3;
       top[i] = Math.min(top[i], top[i - 1] + rate);
       bot[i] = Math.max(bot[i], bot[i - 1] - rate);
     }
@@ -357,14 +530,15 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     const hw = hws[turn.i];
     // The outside of the turn is the way the wave was heading
     const side = turn.dir;
-    if (sec.theme === 'saws' && turn.s >= 0.35 && t - lastSaw >= p.sawGap) {
-      const R = 4 + 4 * turn.s;
+    if (sec.theme === 'saws' && turn.s >= 0.15 && t - lastSaw >= p.sawGap) {
+      // Light hits get small saws, the heaviest a big one on each side
+      const R = 2.5 + 7 * turn.s;
       placeSaw(turn.i, side, R, Math.max(PLAYER_R + 3, hw * p.sawClear));
-      if (turn.s >= 0.8) placeSaw(turn.i, -side, R * 0.8, Math.max(PLAYER_R + 3, hw * p.sawClear * 1.1));
+      if (turn.s >= 0.65) placeSaw(turn.i, -side, R * 0.8, Math.max(PLAYER_R + 3, hw * p.sawClear * 1.1));
       lastSaw = t;
-    } else if (sec.theme === 'tunnel' && turn.s >= p.tunnelSawAt && t - lastSaw >= p.tunnelSawGap) {
+    } else if (sec.theme === 'tunnel' && turn.prom >= p.tunnelSawAt && turn.s >= 0.4 && t - lastSaw >= p.tunnelSawGap) {
       // Half buried in the tunnel wall
-      placeSaw(turn.i, side, 5 + 3 * turn.s, Math.max(PLAYER_R + 2.5, hw * 0.7));
+      placeSaw(turn.i, side, 4 + 5 * turn.s, Math.max(PLAYER_R + 2.5, hw * 0.7));
       lastSaw = t;
     }
   }
@@ -374,21 +548,22 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
   const blocks: Block[] = [];
   let lastPillar = -Infinity;
   for (let k = 0; k < a.onsetTimes.length; k++) {
-    const t = a.onsetTimes[k], s = a.onsetStrength[k];
+    const t = a.onsetTimes[k];
     const i = Math.min(n - 1, Math.round(t * RATE));
-    if (sections[secOf[i]].theme !== 'pillars' || s < 0.35 || t - lastPillar < 0.3) continue;
+    if (sections[secOf[i]].theme !== 'pillars' || w.prom[k] < 0.45 || t - lastPillar < 0.45 - 0.2 * w.inten[k]) continue;
     lastPillar = t;
     const cx = xs[i];
     const x0 = cx - PILLAR_W / 2, x1 = cx + PILLAR_W / 2;
     let lo = Infinity, hi2 = -Infinity;
     for (let j = indexAtX(xs, x0); j < n && xs[j] <= x1; j++) { lo = Math.min(lo, path[j]); hi2 = Math.max(hi2, path[j]); }
-    const gap = hws[i] * p.pillarGap;
+    // Heavier hits close the gap in a bit
+    const gap = hws[i] * p.pillarGap * (1.15 - 0.25 * w.heft[k]);
     // Only the part sticking out of the spiked walls matters
     if (lo - gap > top[i] + 2) blocks.push({ x0, x1, y0: -10, y1: lo - gap });
     if (hi2 + gap < bot[i] - 2) blocks.push({ x0, x1, y0: hi2 + gap, y1: ARENA_H + 10 });
   }
 
-  const orbs: Orb[] = turns.map((turn) => ({ t: turn.i * dt, x: xs[turn.i], y: path[turn.i] }));
+  const orbs: Orb[] = turns.filter((turn) => turn.beat).map((turn) => ({ t: turn.i * dt, x: xs[turn.i], y: path[turn.i] }));
   const beats: { x: number; s: number }[] = [];
   for (let k = 0; k < a.onsetTimes.length; k++) {
     if (a.onsetStrength[k] >= 0.5) beats.push({ x: sampleAt(xs, a.onsetTimes[k]), s: a.onsetStrength[k] });

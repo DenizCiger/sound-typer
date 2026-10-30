@@ -32,7 +32,7 @@ export class WaveSim {
   /** Orbs taken since the last jump, by index. */
   collected = new Set<number>();
 
-  player = { x: 0, y: 50, dir: 1, invuln: 0, mini: false, speed: 72, vy: 72 };
+  player = { x: 0, y: 50, dir: 1, invuln: 0, mini: false, flip: false, speed: 72, vy: 72 };
   hp: number;
   stats: RunStats = newStats();
   position = 0;
@@ -91,6 +91,7 @@ export class WaveSim {
   private applySection(t: number) {
     const sec = sectionAt(this.chart, t);
     this.player.mini = sec.mini;
+    this.player.flip = sec.flip;
     this.player.speed = sec.speed;
     this.player.vy = sec.vy;
   }
@@ -138,7 +139,6 @@ export class WaveSim {
     const p = this.player;
     const adv = pos - this.lastPos;
     for (const cp of c.checkpoints) if (cp > 0 && cp > this.lastPos && cp <= pos) res.checkpoint = true;
-    p.dir = input.hold ? -1 : 1;
 
     // Sub-step so turns land where they were pressed and nothing gets skipped over
     const steps = Math.max(1, Math.ceil(adv / SUBSTEP));
@@ -146,6 +146,8 @@ export class WaveSim {
     for (let k = 1; k <= steps; k++) {
       const t = this.lastPos + h * k;
       this.applySection(t);
+      // Flipped gravity: holding flies down
+      p.dir = (input.hold ? -1 : 1) * (p.flip ? -1 : 1);
       const r = this.radius;
       p.x = sampleAt(c.xs, t);
       p.y = Math.min(ARENA_H - r, Math.max(r, p.y + p.dir * p.vy * h));

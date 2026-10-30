@@ -1,11 +1,15 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { budgetWindow, buildSections, intensityAt, rng, sample, sectionIndexAt, seedFor, type BaseSection, type Difficulty } from '../common';
+import { budgetWindow, buildSections, hitWeights, rng, sample, sectionIndexAt, seedFor, type BaseSection, type Difficulty } from '../common';
 
 /**
  * Just Shapes & Beats style chart: big geometric hazards that show up as a faint warning,
  * turn solid exactly on a hit, then shrink away. Every hazard is a pure function of time
  * (except targeted bars, which lock onto the player's row/column when their warning starts),
  * so the simulation and renderer share the geometry below and seeking needs no replay.
+ *
+ * Every hit is weighed by how much it stands out locally (`prom`: whether and what it spawns) and
+ * how hard it lands (`heft`: how big, wide, fast and lasting the attack is), so a quiet intro's
+ * bumps spawn small, light hazards and a drop's slams spawn wide bars, crosses and bursts.
  *
  * Design rules: fast and dense, but readable. Bars across the arena are the main event; small
  * stuff comes in predictable patterns (trails stepping across the arena, volleys of parallel
@@ -42,8 +46,11 @@ export type Hazard = Timing & (
    * arena, for lanes) overrides `width` (world units) when set.
    */
   | { kind: 'bar'; axis: 'h' | 'v'; at: number; width: number; span?: number; target: boolean }
-  /** Wall sweeping across the arena with a gap to slip through. axis 'v' = vertical wall moving sideways. */
-  | { kind: 'wall'; axis: 'h' | 'v'; from: 0 | 1; gap: number; gapSize: number; width: number }
+  /**
+   * Wall sweeping across the arena with a gap to slip through. axis 'v' = vertical wall moving
+   * sideways. With `kicks` (song times) it creeps and lurches forward on each of those beats.
+   */
+  | { kind: 'wall'; axis: 'h' | 'v'; from: 0 | 1; gap: number; gapSize: number; width: number; kicks?: number[] }
   /**
    * Beam (infinite line) through a point, rotating from a0 to a1. With `path`, pivot and angle
    * follow samples taken every `path.step` seconds from `hit` instead.
@@ -95,9 +102,9 @@ interface Params {
   hp: number;
   gapSize: number;
   speed: number;
-  /** Weakest hit that still spawns something (shots, trail bombs). */
+  /** Least prominent hit that still spawns something (shots, trail bombs). */
   shotMin: number;
-  /** Hit strength that counts as a big hit. */
+  /** Prominence that counts as a big hit. */
   bigAt: number;
   /** Share of full bars that lock onto the player's row/column. */
   targetRatio: number;
@@ -110,7 +117,8 @@ interface Params {
   beams: number;
   /**
    * Seconds between a lane going away and the next one going solid in a steps march, so the
-   * player can always step back over the march instead of being forced to dash.
+   * player can always step back over the march instead of being forced to dash. Lanes end just
+   * before the next one lands, so this is all the march has to leave out of the beat.
    */
   stepSlack: number;
   /** Walls may start once the previous one is this far through its sweep. */
@@ -122,9 +130,9 @@ interface Params {
 }
 
 const PARAMS: Record<Difficulty, Params> = {
-  easy: { lead: 0.85, reaction: 0.4, budget: 3.5, hp: 6, gapSize: 26, speed: 0.9, shotMin: 0.4, bigAt: 0.72, targetRatio: 0.25, pops: 3, seekerGap: 1.4, dashCooldown: 0.2, stepSlack: 0.3, beams: 1, wallSpacing: 0.8, volleys: false, idleMax: 2 },
-  normal: { lead: 0.68, reaction: 0.32, budget: 5.5, hp: 4, gapSize: 20, speed: 1.0, shotMin: 0.25, bigAt: 0.65, targetRatio: 0.4, pops: 5, seekerGap: 0.9, dashCooldown: 0.25, stepSlack: 0.22, beams: 2, wallSpacing: 0.65, volleys: true, idleMax: 1.2 },
-  hard: { lead: 0.55, reaction: 0.27, budget: 7, hp: 3, gapSize: 18, speed: 1.1, shotMin: 0.15, bigAt: 0.58, targetRatio: 0.45, pops: 6, seekerGap: 0.75, dashCooldown: 0.3, stepSlack: 0.16, beams: 2, wallSpacing: 0.55, volleys: true, idleMax: 0.8 },
+  easy: { lead: 0.85, reaction: 0.4, budget: 3.5, hp: 6, gapSize: 26, speed: 0.9, shotMin: 0.45, bigAt: 0.8, targetRatio: 0.25, pops: 3, seekerGap: 1.4, dashCooldown: 0.2, stepSlack: 0.2, beams: 1, wallSpacing: 0.8, volleys: false, idleMax: 2 },
+  normal: { lead: 0.68, reaction: 0.32, budget: 5.5, hp: 4, gapSize: 20, speed: 1.0, shotMin: 0.3, bigAt: 0.75, targetRatio: 0.4, pops: 5, seekerGap: 0.9, dashCooldown: 0.25, stepSlack: 0.13, beams: 2, wallSpacing: 0.65, volleys: true, idleMax: 1.2 },
+  hard: { lead: 0.55, reaction: 0.27, budget: 7, hp: 3, gapSize: 18, speed: 1.1, shotMin: 0.2, bigAt: 0.7, targetRatio: 0.45, pops: 6, seekerGap: 0.75, dashCooldown: 0.3, stepSlack: 0.1, beams: 2, wallSpacing: 0.55, volleys: true, idleMax: 0.8 },
 };
 
 const COST: Record<Hazard['kind'], number> = { shot: 0.25, bomb: 0.8, box: 0.8, bar: 1, wall: 2, beam: 0 };
@@ -132,24 +140,37 @@ const CHECKPOINT_EVERY = 25;
 const CALM_THEMES: Theme[] = ['field', 'rain', 'steps'];
 const ALL_THEMES: Theme[] = ['field', 'bars', 'steps', 'walls', 'spinner', 'rain'];
 const STEP_LANES = 8;
-/** How long a steps lane stays solid. */
+/** How long a steps lane stays solid, at most and at least. */
 const STEP_LIFE = 0.4;
+const STEP_MIN = 0.1;
+/** Share of a lurching wall's sweep that's a steady creep; the rest comes in jolts on the beats. */
+const WALL_CREEP = 0.3;
+/** How long a wall's lurch takes. */
+const LURCH = 0.14;
+/** Intensity from which big hits get the heavy attacks, and from which bars may home in. */
+const HEAVY_INTEN = 0.3;
+const TARGET_INTEN = 0.45;
 /** Full bars of one axis alive at once may cover at most this many world units of the arena. */
 const BAR_COVER = 30;
 const MAX_POP_RADIUS = 14;
 const SEEKER_RADIUS = 6;
 const TRAIL_RADIUS = 4.5;
 const TRAIL_STEP = 0.11;
+/** Heft from which a big hit gets the heavy attacks (walls, ray bursts, rings of shots). */
+const HEAVY = 0.45;
+/** Heft from which bars slam a cross and pop-ups burst into a ring of shots. */
+const SLAM = 0.75;
 
 export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): ShapesChart {
   const p = PARAMS[difficulty];
   const r = rng(seedFor(a) ^ 0x5eed);
+  const w = hitWeights(a);
   let prev: Theme | null = null;
   const sections: ShapesSection[] = buildSections(a, r).map((s) => {
     // Walls only come on big hits; a section without many would sit empty
     let strong = 0;
     for (let i = 0; i < a.onsetTimes.length; i++) {
-      if (a.onsetTimes[i] >= s.start && a.onsetTimes[i] < s.end && a.onsetStrength[i] >= p.bigAt) strong++;
+      if (a.onsetTimes[i] >= s.start && a.onsetTimes[i] < s.end && w.prom[i] >= p.bigAt && w.heft[i] >= HEAVY && w.inten[i] >= HEAVY_INTEN) strong++;
     }
     const punchy = strong / Math.max(1, s.end - s.start) >= 0.35;
     const pool = (s.energy < 0.3 ? CALM_THEMES : ALL_THEMES)
@@ -166,13 +187,17 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
   const hazards: Hazard[] = [];
   const budget = budgetWindow(p.budget);
+  // Heft of the hit being placed: it scales every attack and what it costs, so a quiet passage
+  // fits several light hazards
+  let heft = 0;
+  const cost = (kind: Hazard['kind']) => COST[kind] * (0.6 + 0.6 * heft);
   let id = 0;
   let lastSpawn = 0;
   const push = (h: Omit<Timing, 'id'> & Record<string, unknown>) => {
     const hz = { ...h, id: id++, warn: Math.max(0, h.warn) } as Hazard;
     // Section-long beams are free and pushed out of order; they'd jam the window's queue
     if (COST[hz.kind] > 0) {
-      budget.spend(hz.hit, COST[hz.kind]);
+      budget.spend(hz.hit, cost(hz.kind));
       lastSpawn = Math.max(lastSpawn, hz.hit);
     }
     hazards.push(hz);
@@ -199,7 +224,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     const kicks: { t: number; s: number }[] = [];
     for (let i = 0; i < a.onsetTimes.length; i++) {
       const t = a.onsetTimes[i];
-      if (t >= hit && t < end && a.onsetStrength[i] >= 0.6) kicks.push({ t, s: a.onsetStrength[i] });
+      if (t >= hit && t < end && w.prom[i] >= 0.65) kicks.push({ t, s: w.heft[i] });
     }
     let dir = r() < 0.5 ? -1 : 1;
     let lastFlip = hit;
@@ -211,9 +236,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     for (let t = hit; t <= end + step; t += step) {
       while (ki < kicks.length && kicks[ki].t <= t) {
         const k = kicks[ki++];
-        if (k.s >= 0.9 && t - lastFlip > 4) { dir = -dir; lastFlip = t; }
-        // A short jolt (~10°) on the beat rather than a sustained speed-up
-        kick = Math.max(kick, 1.5 * k.s * k.s);
+        if (k.s >= 0.8 && t - lastFlip > 4) { dir = -dir; lastFlip = t; }
+        // A short jolt on the beat rather than a sustained speed-up, harder for heavier hits
+        kick = Math.max(kick, 1.8 * k.s * k.s);
       }
       const lvl = sample(a.level, a.fps, t), act = sample(a.activity, a.fps, t);
       const drive = Math.min(1, lvl * (0.8 + 0.35 * act));
@@ -231,7 +256,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     }
   }
 
-  // The music's intensity at the hit being placed: it stretches the budget (quiet passages thin
+  // The music's intensity at the hit being placed stretches the budget (quiet passages thin
   // out, loud ones get the full load) and speeds up anything that flies
   let inten = 0;
   let scale = 1;
@@ -239,24 +264,36 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
   // ---- Ray bursts: short beams fanning out of the spinner's pivot on big hits ----
   let lastBurst = -Infinity;
-  const burst = (t: number, s: number, sec: ShapesSection) => {
+  const burst = (t: number, sec: ShapesSection) => {
     const pivot = pivots.get(sec);
-    if (!pivot || t - lastBurst < 0.9 || budget.left(t, scale) < COST.bar) return;
+    if (!pivot || t - lastBurst < 0.9 - 0.4 * inten || budget.left(t, scale) < cost('bar')) return false;
     lastBurst = t;
     const [x, y] = pivot(t);
-    const n = difficulty === 'hard' ? 3 : 2;
+    const n = (difficulty === 'hard' ? 3 : 2) + (heft >= SLAM ? 1 : 0);
     const base = r() * Math.PI;
     for (let k = 0; k < n; k++) {
       const angle = base + (k * Math.PI) / n;
-      push({ kind: 'beam', warn: warnFor(t, 3), hit: t, end: t + 0.3 + 0.2 * s, x, y, a0: angle, a1: angle, width: 3.5 });
+      push({ kind: 'beam', warn: warnFor(t, 3), hit: t, end: t + 0.25 + 0.3 * heft, x, y, a0: angle, a1: angle, width: 2.5 + 2.5 * heft });
+    }
+    return true;
+  };
+
+  // ---- Rings: a slam bursts into shots flying out from where it landed ----
+  const ring = (t: number, x: number, y: number) => {
+    const n = 6 + Math.round(4 * heft) + (difficulty === 'hard' ? 2 : 0);
+    if (difficulty === 'easy' || budget.left(t, scale) < cost('shot') * n) return;
+    const speed = (24 + 22 * heft) * p.speed * pace();
+    const base = r() * Math.PI * 2;
+    for (let k = 0; k < n; k++) {
+      push({ kind: 'shot', warn: t, hit: t, end: t + 200 / speed, x, y, angle: base + (k * 2 * Math.PI) / n, speed, r: 1.3 + 1.2 * heft });
     }
   };
 
   // ---- Pop-ups: circles/boxes that pop on the beat, spread out from each other ----
   const pops: { x: number; y: number; end: number }[] = [];
-  const pop = (t: number, s: number, big: boolean, max = p.pops) => {
+  const pop = (t: number, big: boolean, max = p.pops) => {
     const alive = pops.filter((l) => l.end > t);
-    if (alive.length >= max || budget.left(t, scale) < COST.bomb) return;
+    if (alive.length >= max || budget.left(t, scale) < cost('bomb')) return false;
     // Best of a few candidate spots: the one furthest from the others, so they don't pile up
     let bx = 0.5, by = 0.5, best = -1;
     for (let k = 0; k < 4; k++) {
@@ -264,22 +301,25 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       const d = alive.reduce((m, l) => Math.min(m, Math.hypot(l.x - x, l.y - y)), 2);
       if (d > best) { best = d; bx = x; by = y; }
     }
-    const end = t + 0.35 + 0.3 * s;
-    const size = Math.min(MAX_POP_RADIUS, (5 + 7 * s) * (big ? 1.3 : 1));
+    const end = t + 0.3 + 0.35 * heft;
+    const size = Math.min(MAX_POP_RADIUS, (3.5 + 10 * heft) * (big ? 1.15 : 1));
     if (r() < 0.6) {
       push({ kind: 'bomb', warn: warnFor(t, size), hit: t, end, x: bx, y: by, r: size });
     } else {
-      push({ kind: 'box', warn: warnFor(t, size), hit: t, end, x: bx, y: by, size: size * 1.6, rot: r() * Math.PI, spin: (r() < 0.5 ? -1 : 1) * 2 });
+      push({ kind: 'box', warn: warnFor(t, size), hit: t, end, x: bx, y: by, size: size * 1.6, rot: r() * Math.PI, spin: (r() < 0.5 ? -1 : 1) * (1 + 2 * heft) });
     }
     pops.push({ x: bx, y: by, end });
+    if (big && heft >= SLAM) ring(t, bx, by);
+    return true;
   };
 
   // ---- Seekers: small bombs that land where the player stood, never back to back ----
   let lastSeeker = -Infinity;
   const seeker = (t: number) => {
-    if (t - lastSeeker < p.seekerGap || budget.left(t, scale) < COST.bomb) return false;
+    if (t - lastSeeker < p.seekerGap || budget.left(t, scale) < cost('bomb')) return false;
     lastSeeker = t;
-    push({ kind: 'bomb', warn: warnFor(t, SEEKER_RADIUS), hit: t, end: t + 0.4, x: 0.5, y: 0.5, r: SEEKER_RADIUS, target: true });
+    const size = SEEKER_RADIUS * (0.7 + 0.5 * heft);
+    push({ kind: 'bomb', warn: warnFor(t, size), hit: t, end: t + 0.3 + 0.2 * heft, x: 0.5, y: 0.5, r: size, target: true });
     return true;
   };
 
@@ -290,8 +330,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     trail = { x: spot(), y: spot(), dx: Math.cos(angle) * TRAIL_STEP, dy: Math.sin(angle) * TRAIL_STEP };
   };
   const trailBomb = (t: number) => {
-    if (budget.left(t, scale) < COST.bomb) return;
-    push({ kind: 'bomb', warn: warnFor(t, TRAIL_RADIUS), hit: t, end: t + 0.5, x: trail.x, y: trail.y, r: TRAIL_RADIUS });
+    if (budget.left(t, scale) < cost('bomb')) return;
+    const size = TRAIL_RADIUS * (0.65 + 0.6 * heft);
+    push({ kind: 'bomb', warn: warnFor(t, size), hit: t, end: t + 0.4 + 0.2 * heft, x: trail.x, y: trail.y, r: size });
     trail.x += trail.dx;
     trail.y += trail.dy;
     // Bounce off the edges
@@ -302,25 +343,26 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   // ---- Volleys: a row of parallel shots from one edge ----
   let volleyEdge = 0;
   let volleyCount = 0;
-  const volley = (t: number, s: number) => {
-    const n = 2 + Math.round(2 * s);
-    if (budget.left(t, scale) < COST.shot * n) return;
+  const volley = (t: number) => {
+    // Light hits fire a shot or two, heavy ones a full row
+    const n = 1 + Math.round(3 * heft);
+    if (budget.left(t, scale) < cost('shot') * n) return;
     // Same edge for a few volleys so they read as a pattern, then rotate
     if (volleyCount++ % 4 === 0) volleyEdge = Math.floor(r() * 4);
-    const speed = (38 + 25 * s) * p.speed * pace();
+    const speed = (40 + 24 * heft) * p.speed * pace();
     const offset = r() / n;
     for (let k = 0; k < n; k++) {
       const u = (k + offset) / n;
       const [x, y, angle] = volleyEdge === 0 ? [u, -0.02, Math.PI / 2] : volleyEdge === 1 ? [1.02, u, Math.PI] : volleyEdge === 2 ? [u, 1.02, -Math.PI / 2] : [-0.02, u, 0];
-      push({ kind: 'shot', warn: t - p.lead * 0.7, hit: t, end: t + 260 / speed, x, y, angle, speed, r: 1.6 + s });
+      push({ kind: 'shot', warn: t - p.lead * 0.7, hit: t, end: t + 260 / speed, x, y, angle, speed, r: 1.3 + 1.4 * heft });
     }
   };
 
   // ---- Full bars: never pile up so much of the arena that there's nowhere left to stand ----
   const bars: { axis: 'h' | 'v'; at: number | null; width: number; warn: number; end: number }[] = [];
-  const fullBar = (t: number, s: number, axis: 'h' | 'v', target: boolean, extra = 1) => {
-    const width = 5 + 7 * s;
-    const warn = warnFor(t, width / 2, extra), end = t + 0.45;
+  const fullBar = (t: number, axis: 'h' | 'v', target: boolean, extra = 1) => {
+    const width = 3 + 10 * heft;
+    const warn = warnFor(t, width / 2, extra), end = t + 0.35 + 0.2 * heft;
     // Dense hits would otherwise fill half the screen within a second: count every bar on the
     // same axis that's warning or solid at any point while this one is
     const live = bars.filter((b) => b.axis === axis && b.end > warn && b.warn < end);
@@ -343,15 +385,17 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   let lastAxis: 'h' | 'v' = 'v';
   let lastFrom: 0 | 1 = 0;
   let step = 0, stepDir = 1;
-  let lastStep = -Infinity;
+  let stepFree = -Infinity;
   let stepAxis: 'h' | 'v' = 'v';
   let secIndex = -1;
 
   for (let i = 0; i < a.onsetTimes.length; i++) {
     const t = a.onsetTimes[i];
-    const s = a.onsetStrength[i];
+    const prom = w.prom[i];
     const low = a.onsetLowness[i];
-    if (t < 1.5 || s < p.shotMin) continue;
+    inten = w.inten[i];
+    // Near silence, only the hits that stand out
+    if (t < 1.5 || prom < (inten < 0.1 ? 0.45 : p.shotMin)) continue;
     const si = sectionIndexAt(sections, t);
     const sec = sections[si];
     if (si !== secIndex) {
@@ -362,58 +406,78 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       step = stepDir > 0 ? 0 : STEP_LANES - 1;
       newTrail();
     }
-    const big = s >= p.bigAt;
-    const mid = s >= 0.45;
+    heft = w.heft[i];
+    const big = prom >= p.bigAt;
+    // Big hits in a quiet passage stand out but don't land hard: they get the light attacks
+    const heavy = big && heft >= HEAVY && inten >= HEAVY_INTEN;
+    // Bars that home in on the player are for the intense parts only
+    const homing = heavy && inten >= TARGET_INTEN && r() < p.targetRatio;
+    const mid = prom >= 0.45;
     const weak = !mid;
-    inten = intensityAt(a, t);
     scale = 0.3 + 0.9 * inten;
-    // Quiet passages only react to the hits that stand out
-    if (!mid && inten < 0.2) continue;
     const left = budget.left(t, scale);
-    const idle = t - lastSpawn > p.idleMax;
+    // In a dense stream, a lesser hit leaves room for a clearly bigger one right behind it
+    if (!big) {
+      let ahead = false;
+      for (let j = i + 1; j < a.onsetTimes.length && a.onsetTimes[j] - t < 0.2; j++) {
+        if (w.prom[j] >= p.bigAt && w.heft[j] > heft + 0.15) ahead = true;
+      }
+      if (ahead && left < COST.bar * 2) continue;
+    }
+    const idle = t - lastSpawn > p.idleMax * (1 + 1.5 * (1 - inten));
     const before = hazards.length;
 
     switch (sec.theme) {
       case 'field':
-        if (big && left >= COST.bar && fullBar(t, s, alt++ % 2 ? 'h' : 'v', r() < p.targetRatio)) break;
-        if (mid) { if (low < 0.35 || !seeker(t)) pop(t, s, false); }
+        if (heavy && left >= cost('bar') && fullBar(t, alt++ % 2 ? 'h' : 'v', homing)) break;
+        if (mid) { if (low < 0.35 || !seeker(t)) pop(t, big); }
         else if (difficulty !== 'easy') trailBomb(t);
         break;
 
       case 'bars':
-        if (weak) { if (p.volleys) volley(t, s); break; }
-        if (left < COST.bar) break;
+        if (weak) { if (p.volleys) volley(t); break; }
+        if (left < cost('bar')) break;
         {
           const axis = alt++ % 2 ? 'h' : 'v';
-          // The biggest hits slam a cross
-          if (fullBar(t, s, axis, big && r() < p.targetRatio, big ? 1.1 : 1) && difficulty !== 'easy' && s >= 0.88 && left >= COST.bar * 2) {
-            fullBar(t, s, axis === 'h' ? 'v' : 'h', false, 1.1);
+          // The heaviest hits slam a cross
+          if (fullBar(t, axis, homing, big ? 1.1 : 1) && difficulty !== 'easy' && heavy && heft >= SLAM && left >= cost('bar') * 2) {
+            fullBar(t, axis === 'h' ? 'v' : 'h', false, 1.1);
           }
         }
         break;
 
       case 'steps': {
-        if (weak) { if (p.volleys) volley(t, s); break; }
         // A lane only goes solid once the previous one is gone (plus some slack): the march
-        // can't turn into a solid block the player has to dash through when hits come in a burst
-        if (left < COST.bar || t - lastStep < STEP_LIFE + p.stepSlack) break;
-        lastStep = t;
+        // can't turn into a solid block the player has to dash through when hits come in a burst.
+        // Lanes are shorter-lived in intense parts, so the march keeps up with fast music
+        if (weak || left < cost('bar') || t < stepFree) {
+          // Volleys only from what the march leaves over, so it doesn't skip beats for them
+          if (p.volleys && !big && left >= COST.bar * 1.5) volley(t);
+          break;
+        }
+        // Each lane goes away just before the march's next beat lands, so the march can step on
+        // every beat and still never has two lanes solid at once
+        let life = STEP_LIFE * (1.15 - 0.45 * inten);
+        for (let j = i + 1; j < a.onsetTimes.length && a.onsetTimes[j] < t + life + p.stepSlack; j++) {
+          if (w.prom[j] >= 0.45 && a.onsetTimes[j] - t >= STEP_MIN + p.stepSlack) { life = a.onsetTimes[j] - t - p.stepSlack; break; }
+        }
+        stepFree = t + life + p.stepSlack;
         const span = 1 / STEP_LANES;
-        push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + STEP_LIFE, axis: stepAxis, at: (step + 0.5) * span, width: 0, span: span * 0.92, target: false });
+        push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + life, axis: stepAxis, at: (step + 0.5) * span, width: 0, span: span * 0.92, target: false });
         step += stepDir;
         if (step < 0 || step >= STEP_LANES) {
           // Bounce back from the edge, turning the march around
           stepDir = -stepDir;
           step += 2 * stepDir;
         }
-        if (big && low > 0.4) pop(t, s, true);
+        if (heavy && low > 0.4) pop(t, true);
         break;
       }
 
       case 'walls': {
         // Walls don't scale with speed fully: a wall much faster than the player can only be dashed
         const dur = (3.6 - 1.0 * sec.energy) / Math.sqrt(p.speed);
-        if (big && t - lastWall > dur * p.wallSpacing && left >= COST.wall) {
+        if (heavy && t - lastWall > dur * p.wallSpacing && left >= cost('wall')) {
           // Keep the axis and direction within a run of walls; switch once things calm down
           if (t - lastWall > dur * 2) {
             lastAxis = r() < 0.5 ? 'h' : 'v';
@@ -423,9 +487,17 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
           const gap = t - lastWall < dur * 2 ? Math.min(0.8, Math.max(0.2, lastGap + (r() - 0.5) * 0.6)) : 0.2 + r() * 0.6;
           lastGap = gap;
           lastWall = t;
-          push({ kind: 'wall', warn: t - p.lead * 1.2, hit: t, end: t + dur, axis: lastAxis, from: lastFrom, gap, gapSize: p.gapSize, width: 7 });
+          // The wall lurches forward on the beats of its sweep instead of gliding
+          const kicks: number[] = [];
+          for (let j = i + 1; j < a.onsetTimes.length && a.onsetTimes[j] < t + dur - LURCH * 2; j++) {
+            if (w.prom[j] >= 0.5 && a.onsetTimes[j] - (kicks[kicks.length - 1] ?? t) >= 0.2) kicks.push(a.onsetTimes[j]);
+          }
+          const wall = { kind: 'wall', warn: t - p.lead * 1.2, hit: t, end: t + dur, axis: lastAxis, from: lastFrom, gap, gapSize: p.gapSize, width: 6 + 6 * heft, kicks: kicks.length >= 3 ? kicks : undefined } as const;
+          push(wall);
+          // The heaviest hits close in from both sides at once, gaps lined up
+          if (heft >= 0.65 && difficulty !== 'easy' && budget.left(t, scale) >= cost('wall')) push({ ...wall, from: lastFrom === 0 ? 1 : 0 });
         } else if (mid) {
-          pop(t, s, false, Math.ceil(p.pops / 2));
+          pop(t, big, Math.ceil(p.pops / 2));
         } else if (difficulty !== 'easy') {
           trailBomb(t);
         }
@@ -434,26 +506,27 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
       case 'spinner':
         // The beams already sweep the whole arena; lighter on everything else
-        if (big) burst(t, s, sec);
-        else if (mid) pop(t, s, false, Math.ceil(p.pops / 2));
-        else if (difficulty === 'hard') trailBomb(t);
+        if (heavy && burst(t, sec)) break;
+        if (mid && pop(t, big, Math.ceil(p.pops / 2))) break;
+        if (difficulty === 'hard' || (difficulty === 'normal' && inten > 0.5)) trailBomb(t);
         break;
 
       case 'rain':
         if (big) {
-          pop(t, s, true);
+          pop(t, true);
         } else if (mid && low > 0.5 && seeker(t)) {
           // Seeker placed
-        } else if (left >= COST.shot) {
-          const speed = (32 + 22 * s) * p.speed * pace();
-          push({ kind: 'shot', warn: t - p.lead * 0.6, hit: t, end: t + 260 / speed, x: spot(), y: -0.02, angle: Math.PI / 2 + (r() - 0.5) * 0.3, speed, r: 1.4 + s });
+        } else if (left >= cost('shot')) {
+          const speed = (34 + 24 * heft) * p.speed * pace();
+          push({ kind: 'shot', warn: t - p.lead * 0.6, hit: t, end: t + 260 / speed, x: spot(), y: -0.02, angle: Math.PI / 2 + (r() - 0.5) * 0.3, speed, r: 1.2 + 1.6 * heft });
         }
         break;
     }
 
-    // Nothing for a while and this hit didn't spawn anything either: fill the silence
-    if (idle && hazards.length === before && inten > 0.2) {
-      if (p.volleys && (sec.theme === 'bars' || sec.theme === 'steps')) volley(t, s);
+    // Nothing for a while and this hit didn't spawn anything either: fill the silence (longer
+    // silences are fine when the music is calm)
+    if (idle && hazards.length === before) {
+      if (p.volleys && (sec.theme === 'bars' || sec.theme === 'steps')) volley(t);
       else trailBomb(t);
     }
   }
@@ -486,6 +559,28 @@ function envelope(hz: Hazard, t: number) {
   return pop * Math.max(0, tail);
 }
 
+/** How far through its sweep a wall is at time t, 0..1. */
+function wallProgress(hz: Extract<Hazard, { kind: 'wall' }>, t: number) {
+  const p = Math.min(1, Math.max(0, (t - hz.hit) / (hz.end - hz.hit)));
+  if (!hz.kicks) return p;
+  let jolts = 0;
+  for (const k of hz.kicks) {
+    if (t <= k) break;
+    // Fast out, settling in: a lurch, not a slide
+    const u = Math.min(1, (t - k) / LURCH);
+    jolts += 1 - (1 - u) * (1 - u) * (1 - u);
+  }
+  return WALL_CREEP * p + (1 - WALL_CREEP) * (jolts / hz.kicks.length);
+}
+
+/** The latest beat a lurching wall jolted on, for the renderer's flash. */
+export function lastKick(hz: Hazard, t: number) {
+  if (hz.kind !== 'wall' || !hz.kicks) return hz.hit;
+  let last = hz.hit;
+  for (const k of hz.kicks) { if (k > t) break; last = k; }
+  return last;
+}
+
 /** Shapes of a hazard at time t (during its warning they describe where it will be). */
 export function geometry(hz: Hazard, t: number, arena: ArenaInfo): Geo[] {
   const { w, h } = arena;
@@ -510,7 +605,7 @@ export function geometry(hz: Hazard, t: number, arena: ArenaInfo): Geo[] {
         : [{ type: 'rect', x: at * w, y: h / 2, hw: half, hh: big, rot: 0 }];
     }
     case 'wall': {
-      const p = Math.min(1, Math.max(0, (t - hz.hit) / (hz.end - hz.hit)));
+      const p = wallProgress(hz, t);
       const span = hz.axis === 'v' ? w : h; // direction of travel
       const across = hz.axis === 'v' ? h : w;
       const from = -hz.width, to = span + hz.width;

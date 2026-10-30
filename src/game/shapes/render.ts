@@ -1,7 +1,7 @@
 import type { Hit } from '../../audio/driver';
 import { prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
-import { geometry, type Geo, type Hazard } from './chart';
+import { geometry, lastKick, type Geo, type Hazard } from './chart';
 import { PLAYER_SIZE, type ShapesSim, type ShapesStep } from './sim';
 
 const BG = '#0b0a10';
@@ -179,7 +179,8 @@ export class ShapesRenderer {
       return;
     }
     // Solid: white flash right on the beat, then hot pink
-    const age = pos - hz.hit;
+    // Lurching walls flash again on every jolt
+    const age = pos - lastKick(hz, pos);
     const beat = 1 + 0.06 * this.pulse;
     ctx.fillStyle = age < 0.06 ? '#fff' : `rgb(${PINK})`;
     if (fx.glowIntensity > 0) {

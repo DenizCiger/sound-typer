@@ -47,6 +47,50 @@ export function intensityAt(a: TrackAnalysis, t: number, dynamics = 1.5) {
   return Math.pow(drive, dynamics);
 }
 
+/** Seconds either side of a hit that its prominence is judged against. */
+const PROM_WINDOW = 4;
+
+export interface HitWeights {
+  /**
+   * How much a hit stands out from the hits around it, 0..1. A bump in a quiet intro rates as
+   * high as a snare in a drop, so quiet passages still get a reaction; it decides *whether* and
+   * *what kind* of thing a hit spawns.
+   */
+  prom: Float32Array;
+  /**
+   * How hard the hit lands, 0..1: its strength and the music's intensity, a bit more when it
+   * stands out. It decides *how big* the reaction is (size, speed, width).
+   */
+  heft: Float32Array;
+  /** Music intensity at each hit (`intensityAt`). */
+  inten: Float32Array;
+}
+
+export function hitWeights(a: TrackAnalysis): HitWeights {
+  const n = a.onsetTimes.length;
+  const prom = new Float32Array(n), heft = new Float32Array(n), inten = new Float32Array(n);
+  // Reference: the 80th percentile of strengths in the window, so a few huge hits nearby don't
+  // drown the rest, and a passage of uniformly weak hits still has its standouts
+  let lo = 0, hi = 0;
+  const win: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = a.onsetTimes[i];
+    while (hi < n && a.onsetTimes[hi] <= t + PROM_WINDOW) hi++;
+    while (a.onsetTimes[lo] < t - PROM_WINDOW) lo++;
+    win.length = 0;
+    for (let j = lo; j < hi; j++) win.push(a.onsetStrength[j]);
+    win.sort((x, y) => x - y);
+    const ref = Math.max(0.18, win[Math.floor((win.length - 1) * 0.8)]);
+    const s = a.onsetStrength[i];
+    // Between the absolute and the relative strength: a loud song's weak hits stay weak-ish
+    prom[i] = Math.min(1, 0.3 * s + 0.7 * (s / ref));
+    inten[i] = intensityAt(a, t);
+    // Quiet passages keep their hits light however much they stand out
+    heft[i] = Math.min(1, s * (0.35 + 0.65 * Math.sqrt(inten[i])) * (0.7 + 0.3 * prom[i]) + 0.15 * inten[i]);
+  }
+  return { prom, heft, inten };
+}
+
 export function sectionIndexAt(sections: { start: number }[], t: number) {
   let a = 0, b = sections.length - 1;
   while (a < b) { const m = (a + b + 1) >> 1; if (sections[m].start <= t) a = m; else b = m - 1; }
