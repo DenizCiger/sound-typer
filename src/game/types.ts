@@ -53,6 +53,8 @@ export interface GameEngine {
   readonly duration: number;
   readonly player: { x: number; y: number };
   readonly health: { hp: number; max: number } | null;
+  /** Song positions the player rewinds to (starting with 0), for the progress bar; null without checkpoints. */
+  readonly checkpoints: readonly number[] | null;
   resize(w: number, h: number): void;
   /** Back to the start of a fresh run. */
   reset(): void;

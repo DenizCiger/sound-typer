@@ -22,6 +22,7 @@ export class ShapesGame implements GameEngine {
   get position() { return this.sim.position; }
   get player() { return this.sim.player; }
   get health() { return { hp: this.sim.hp, max: this.sim.chart.maxHp }; }
+  get checkpoints() { return this.sim.chart.checkpoints; }
 
   resize(w: number, h: number) { this.sim.resize(w, h); }
 

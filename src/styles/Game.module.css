@@ -235,3 +235,84 @@
   text-transform: uppercase;
   color: var(--text-muted);
 }
+
+/* Song progress with the checkpoints on it (Shapes, Wave) */
+.progress {
+  --progress: 0%;
+  --segment-from: 0%;
+  --segment-to: 0%;
+  position: absolute;
+  top: 22px;
+  left: 50%;
+  width: min(360px, 34%);
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+/* The stretch until the next checkpoint */
+.segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--segment-from);
+  width: calc(var(--segment-to) - var(--segment-from));
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--progress);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.55);
+}
+
+.checkpoint {
+  position: absolute;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  transform: translate(-50%, -50%) rotate(45deg);
+  background: #0d0d10;
+  border: 1.5px solid rgba(255, 255, 255, 0.4);
+  transition: background 200ms ease, border-color 200ms ease;
+}
+
+.checkpoint[data-reached] {
+  background: #fff;
+  border-color: #fff;
+}
+
+.finish {
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+}
+
+.head {
+  position: absolute;
+  top: 50%;
+  left: var(--progress);
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: #22d3ee;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.7);
+}
+
+@media (max-width: 767px) {
+  .progress {
+    top: 58px;
+    left: 14px;
+    width: calc(100% - 28px);
+    transform: none;
+  }
+}

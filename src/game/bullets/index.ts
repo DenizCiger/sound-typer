@@ -12,6 +12,7 @@ export class BulletGame implements GameEngine {
   private renderer = new GameRenderer();
   readonly duration: number;
   readonly health = null;
+  readonly checkpoints = null;
 
   constructor(analysis: TrackAnalysis, difficulty: Difficulty) {
     this.sim = new GameSim(buildChart(analysis, difficulty), analysis);

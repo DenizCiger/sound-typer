@@ -102,6 +102,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   const multRef = useRef<HTMLSpanElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
   const healthRef = useRef<HTMLSpanElement>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
   const keysRef = useRef(new Set<string>());
   const dashRef = useRef(false);
   const pointerRef = useRef<{
@@ -166,6 +167,23 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     if (hitsRef.current) hitsRef.current.textContent = String(e.stats.hits);
     if (healthRef.current && e.health) {
       healthRef.current.textContent = '■'.repeat(Math.max(0, e.health.hp)) + '□'.repeat(Math.max(0, e.health.max - e.health.hp));
+    }
+    const bar = progressRef.current;
+    if (bar && e.checkpoints) {
+      const pos = Math.min(e.position, e.duration);
+      const share = (t: number) => `${(100 * t) / Math.max(1e-3, e.duration)}%`;
+      // The stretch from the checkpoint you'd rewind to up to the next one (or the end)
+      let from = 0, to = e.duration;
+      for (const c of e.checkpoints) {
+        if (c <= pos) from = c;
+        else { to = c; break; }
+      }
+      bar.style.setProperty('--progress', share(pos));
+      bar.style.setProperty('--segment-from', share(from));
+      bar.style.setProperty('--segment-to', share(to));
+      for (const el of bar.querySelectorAll<HTMLElement>('[data-at]')) {
+        el.toggleAttribute('data-reached', Number(el.dataset.at) <= pos);
+      }
     }
   };
 
@@ -465,6 +483,18 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         </div>
         {practice && <span className={styles.practice}>Practice</span>}
       </div>
+
+      {engine?.checkpoints && (
+        <div ref={progressRef} className={styles.progress} aria-hidden="true">
+          <div className={styles.segment} />
+          <div className={styles.fill} />
+          {engine.checkpoints.filter((c) => c > 0).map((c) => (
+            <span key={c} data-at={c} className={styles.checkpoint} style={{ left: `${(100 * c) / engine.duration}%` }} />
+          ))}
+          <span data-at={engine.duration} className={`${styles.checkpoint} ${styles.finish}`} style={{ left: '100%' }} />
+          <div className={styles.head} />
+        </div>
+      )}
 
       {respawning && (
         <div className={styles.respawn}>
