@@ -36,7 +36,6 @@ const H_SPEED = 72;
 export const SPEED_STAGES = [0.6, 0.8, 1, 1.25, 1.55, 1.9];
 export const PLAYER_R = 1.1;
 export const MINI_R = 0.75;
-export const ORB_R = 3;
 /** With nothing to slide along, the path takes any hit after flying straight this long. */
 const MAX_STRAIGHT = 0.9;
 const PILLAR_W = 7;
@@ -61,7 +60,6 @@ export interface WaveSection extends BaseSection {
 
 export interface Saw { x: number; y: number; r: number }
 export interface Block { x0: number; x1: number; y0: number; y1: number }
-export interface Orb { t: number; x: number; y: number }
 
 export interface WaveChart {
   sections: WaveSection[];
@@ -77,8 +75,6 @@ export interface WaveChart {
   /** Sorted by x. */
   saws: Saw[];
   blocks: Block[];
-  /** Bonus orbs on the path's turns, sorted by time. */
-  orbs: Orb[];
   /** World x of the stronger hits, for the background's beat lines. */
   beats: { x: number; s: number }[];
   checkpoints: number[];
@@ -458,11 +454,10 @@ export function buildWaveChart(a: TrackAnalysis, difficulty: Difficulty): WaveCh
     if (hi2 + gap < bot[i] - 2) blocks.push({ x0, x1, y0: hi2 + gap, y1: bot[i] + 10 });
   }
 
-  const orbs: Orb[] = turns.filter((turn) => turn.beat).map((turn) => ({ t: turn.i * dt, x: xs[turn.i], y: path[turn.i] }));
   const beats: { x: number; s: number }[] = [];
   for (let k = 0; k < a.onsetTimes.length; k++) {
     if (a.onsetStrength[k] >= 0.5) beats.push({ x: sampleAt(xs, a.onsetTimes[k]), s: a.onsetStrength[k] });
   }
 
-  return { sections, xs, path, top, bot, spiky, saws, blocks, orbs, beats, checkpoints, maxHp: p.hp };
+  return { sections, xs, path, top, bot, spiky, saws, blocks, beats, checkpoints, maxHp: p.hp };
 }

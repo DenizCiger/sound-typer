@@ -20,7 +20,6 @@ export class BulletGame implements GameEngine {
   }
 
   get stats() { return this.sim.stats; }
-  get multiplier() { return this.sim.multiplier; }
   get position() { return this.sim.position; }
   get player() { return this.sim.player; }
   get scale() { return this.sim.scale; }

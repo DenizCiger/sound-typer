@@ -18,7 +18,6 @@ export class WaveGame implements GameEngine {
   }
 
   get stats() { return this.sim.stats; }
-  get multiplier() { return this.sim.multiplier; }
   get position() { return this.sim.position; }
   get player() { return this.sim.player; }
   get health() { return { hp: this.sim.hp, max: this.sim.chart.maxHp }; }

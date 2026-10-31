@@ -1,21 +1,17 @@
 import type { TrackAnalysis } from '../../audio/analysis';
 import { intensityAt, sample } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
-import { lowerBound, MINI_R, ORB_R, PLAYER_R, sampleAt, sectionAt, type WaveChart } from './chart';
+import { lowerBound, MINI_R, PLAYER_R, sampleAt, sectionAt, type WaveChart } from './chart';
 
 const INVULN = 1.2;
 const REWIND_GRACE = 2;
 const MAX_CATCHUP = 0.25;
 const SUBSTEP = 1 / 240;
-const COMBO_STEP = 5;
-const MAX_MULT = 8;
 
 export interface WaveStep {
   hit: boolean;
   /** Health ran out; the song is about to rewind. */
   died: boolean;
-  /** Orbs picked up this frame. */
-  orbs: number;
   checkpoint: boolean;
   rewound: boolean;
   /** The run jumped (seek or rewind): the trail should restart. */
@@ -28,26 +24,19 @@ export class WaveSim {
   private lastPos = -1;
   private pendingRewind: number | null = null;
   private expectRewind: number | null = null;
-  private orbCursor = 0;
-  /** Orbs taken since the last jump, by index. */
-  collected = new Set<number>();
 
   player = { x: 0, y: 50, dir: 1, invuln: 0, mini: false, flip: false, speed: 72, vy: 72 };
   hp: number;
   stats: RunStats = newStats();
   position = 0;
 
-  /** Testing: nothing hurts. Every step with it on marks the run as practice. */
+  /** Testing: nothing hurts. */
   invincible = false;
 
   constructor(chart: WaveChart, analysis: TrackAnalysis) {
     this.chart = chart;
     this.analysis = analysis;
     this.hp = chart.maxHp;
-  }
-
-  get multiplier() {
-    return Math.min(MAX_MULT, 1 + Math.floor(this.stats.combo / COMBO_STEP));
   }
 
   get radius() {
@@ -86,10 +75,6 @@ export class WaveSim {
     p.x = sampleAt(this.chart.xs, t);
     p.y = sampleAt(this.chart.path, t);
     this.applySection(t);
-    const orbs = this.chart.orbs;
-    this.collected.clear();
-    this.orbCursor = 0;
-    while (this.orbCursor < orbs.length && orbs[this.orbCursor].t < t) this.orbCursor++;
   }
 
   private applySection(t: number) {
@@ -116,8 +101,7 @@ export class WaveSim {
   }
 
   step(pos: number, _dt: number, input: GameInput): WaveStep {
-    const res: WaveStep = { hit: false, died: false, orbs: 0, checkpoint: false, rewound: false, jumped: false };
-    if (this.invincible) this.stats.practice = true;
+    const res: WaveStep = { hit: false, died: false, checkpoint: false, rewound: false, jumped: false };
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
       if (this.expectRewind !== null && Math.abs(pos - this.expectRewind) < 0.5) {
@@ -128,7 +112,6 @@ export class WaveSim {
       } else if (jumped && pos < 0.1) {
         this.reset();
       } else if (jumped || pos > 0.5) {
-        this.stats.practice = true;
         this.player.invuln = Math.max(this.player.invuln, 0.5);
       }
       this.snap(pos);
@@ -158,15 +141,6 @@ export class WaveSim {
       p.y += p.dir * p.vy * h;
       p.invuln = Math.max(0, p.invuln - h);
 
-      const orbs = c.orbs;
-      while (this.orbCursor < orbs.length && orbs[this.orbCursor].x < p.x - ORB_R) this.orbCursor++;
-      for (let i = this.orbCursor; i < orbs.length && orbs[i].x < p.x + ORB_R + r; i++) {
-        if (!this.collected.has(i) && Math.hypot(orbs[i].x - p.x, orbs[i].y - p.y) < ORB_R + r) {
-          this.collected.add(i);
-          res.orbs++;
-        }
-      }
-
       if (p.invuln <= 0 && !this.invincible && !res.hit && this.touching(t, p.x, p.y, r)) {
         res.hit = true;
         // Back onto the path, so the wave isn't stuck inside a wall when the grace runs out
@@ -180,7 +154,6 @@ export class WaveSim {
     const s = this.stats;
     if (res.hit) {
       s.hits++;
-      s.combo = 0;
       this.hp--;
       if (this.hp <= 0) {
         res.died = true;
@@ -191,13 +164,7 @@ export class WaveSim {
         this.pendingRewind = cp;
         this.expectRewind = cp;
       }
-    } else {
-      s.combo += adv;
     }
-    const mult = this.multiplier;
-    s.maxMult = Math.max(s.maxMult, mult);
-    s.grazes += res.orbs;
-    s.score += adv * 10 * mult * (0.5 + this.levelAt(pos)) + res.orbs * 40 * mult;
     return res;
   }
 }

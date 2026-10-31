@@ -21,8 +21,6 @@ const SAFE_SPAWN_RADIUS = 10;
 const SECTION_BLEND = 0.8;
 const MAX_CATCHUP = 0.25;
 const MAX_BULLETS = 1500;
-const COMBO_STEP = 5; // seconds without a hit per multiplier step
-const MAX_MULT = 8;
 const LASER_WIDTH = 3.2;
 
 /** Play area scale bounds: 2.5x zoom when little is going on, out past the screen when it's packed. */
@@ -89,7 +87,7 @@ export class GameSim {
   position = 0;
   /** The zoom setting: how much the play area follows the music (0 keeps it still). */
   zoomAmount = 1;
-  /** Testing: nothing hurts. Every step with it on marks the run as practice. */
+  /** Testing: nothing hurts. */
   invincible = false;
   /** Play area scale, following how much of it the bullets cover. */
   private areaScale = ZOOM_CALM;
@@ -99,10 +97,6 @@ export class GameSim {
     this.analysis = analysis;
     this.shots = chart.events.filter((e) => e.kind !== 'laser');
     this.lasers = chart.events.filter((e): e is Extract<ChartEvent, { kind: 'laser' }> => e.kind === 'laser');
-  }
-
-  get multiplier() {
-    return Math.min(MAX_MULT, 1 + Math.floor(this.stats.combo / COMBO_STEP));
   }
 
   resize(w: number, h: number) {
@@ -283,7 +277,6 @@ export class GameSim {
     const p = this.player;
     res.hit = true;
     this.stats.hits++;
-    this.stats.combo = 0;
     p.invuln = INVULN;
     // Clear the area so one mistake doesn't chain into several
     this.bullets = this.bullets.filter((b) => {
@@ -295,13 +288,10 @@ export class GameSim {
 
   step(pos: number, dt: number, input: GameInput): StepResult {
     const res: StepResult = { hit: false, grazes: 0, fired: [], popped: [], laserFired: false };
-    if (this.invincible) this.stats.practice = true;
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
-      // Jumping back to the very start is a clean restart; any other seek (or starting
-      // mid-song) makes it a practice run
+      // Jumping back to the very start is a clean restart
       if (jumped && pos < 0.1) this.reset();
-      else if (jumped || pos > 0.5) this.stats.practice = true;
       this.resync(pos);
       this.lastPos = pos;
       this.position = pos;
@@ -358,14 +348,6 @@ export class GameSim {
         if (!b.grazed && d < b.r + GRAZE_RADIUS) { b.grazed = true; res.grazes++; }
       }
     }
-
-    // ---- Score ----
-    const s = this.stats;
-    if (!res.hit) s.combo += adv;
-    const mult = this.multiplier;
-    s.maxMult = Math.max(s.maxMult, mult);
-    s.grazes += res.grazes;
-    s.score += adv * 10 * mult * (0.5 + this.levelAt(pos)) + res.grazes * 20 * mult;
     return res;
   }
 }

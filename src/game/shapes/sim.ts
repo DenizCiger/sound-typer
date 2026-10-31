@@ -13,8 +13,6 @@ const DASH_GRACE = 0.06;
 const INVULN = 1.5;
 const REWIND_GRACE = 2;
 const MAX_CATCHUP = 0.25;
-const COMBO_STEP = 5;
-const MAX_MULT = 8;
 
 export interface ShapesStep {
   hit: boolean;
@@ -41,7 +39,7 @@ export class ShapesSim {
   active: Hazard[] = [];
   /** The zoom setting: how much the arena follows its scale curve (0 keeps it still). */
   zoomAmount = 1;
-  /** Testing: nothing hurts. Every step with it on marks the run as practice. */
+  /** Testing: nothing hurts. */
   invincible = false;
   arena: ArenaInfo = { w: 100, h: 100, scaleAt: (t) => zoomAt(this.chart.zoom, t, this.zoomAmount), targets: new Map() };
   player = { x: 50, y: 70, invuln: 0, dash: 0, cooldown: 0, dirX: 0, dirY: -1, vx: 0, vy: 0 };
@@ -53,10 +51,6 @@ export class ShapesSim {
     this.chart = chart;
     this.analysis = analysis;
     this.hp = chart.maxHp;
-  }
-
-  get multiplier() {
-    return Math.min(MAX_MULT, 1 + Math.floor(this.stats.combo / COMBO_STEP));
   }
 
   get dashing() {
@@ -178,7 +172,6 @@ export class ShapesSim {
 
   step(pos: number, dt: number, input: GameInput): ShapesStep {
     const res: ShapesStep = { hit: false, died: false, dodges: 0, dashed: false, checkpoint: false, rewound: false };
-    if (this.invincible) this.stats.practice = true;
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
       if (this.expectRewind !== null && Math.abs(pos - this.expectRewind) < 0.5) {
@@ -188,8 +181,6 @@ export class ShapesSim {
         res.rewound = true;
       } else if (jumped && pos < 0.1) {
         this.reset();
-      } else if (jumped || pos > 0.5) {
-        this.stats.practice = true;
       }
       this.resync(pos);
       this.lastPos = pos;
@@ -243,7 +234,6 @@ export class ShapesSim {
     const s = this.stats;
     if (res.hit) {
       s.hits++;
-      s.combo = 0;
       p.invuln = INVULN;
       this.hp--;
       if (this.hp <= 0) {
@@ -255,13 +245,7 @@ export class ShapesSim {
         this.pendingRewind = cp;
         this.expectRewind = cp;
       }
-    } else {
-      s.combo += adv;
     }
-    const mult = this.multiplier;
-    s.maxMult = Math.max(s.maxMult, mult);
-    s.grazes += res.dodges;
-    s.score += adv * 10 * mult * (0.5 + this.levelAt(pos)) + res.dodges * 40 * mult;
     return res;
   }
 }

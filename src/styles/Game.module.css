@@ -50,15 +50,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.practice {
-  align-self: center;
-  font-size: 10px;
-  padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--text-muted);
-}
-
 .overlay {
   position: absolute;
   inset: 0;
@@ -121,24 +112,6 @@
   border: 1px solid var(--border);
   border-radius: 3px;
   color: var(--text);
-}
-
-.grade {
-  font-size: 44px;
-  font-weight: 700;
-  line-height: 1;
-  color: var(--text);
-}
-
-.score {
-  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
-  font-size: 20px;
-  color: var(--text);
-}
-
-.note {
-  font-size: 11px;
-  color: var(--text-muted);
 }
 
 .resultRows {

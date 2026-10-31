@@ -11,7 +11,7 @@ import styles from '../styles/Game.module.css';
 export interface GameHandle {
   /** Advances the game to the audible position and draws it. */
   frame: (pos: number, dt: number) => void;
-  /** The song ended: show the results. */
+  /** The song ended: show how the run went. */
   finish: () => void;
   /** Playback is starting; begins a new run if the last one finished. */
   start: () => void;
@@ -19,7 +19,6 @@ export interface GameHandle {
 
 interface GameProps {
   analysis: TrackAnalysis | null;
-  trackName: string;
   status: string | null;
   isPlaying: boolean;
   style: GameStyle;
@@ -42,18 +41,10 @@ interface GameProps {
 }
 
 interface Results {
-  score: number;
   hits: number;
-  grazes: number;
   deaths: number;
-  maxMult: number;
-  grade: string;
-  best: number | null;
-  newBest: boolean;
-  practice: boolean;
 }
 
-const SCORES_KEY = 'sound-typer-scores';
 // Only used for hit detection, the typing speed doesn't matter here
 const HIT_PARAMS: DriverParams = { maxCps: 0, dynamics: 1, punch: 0 };
 const NO_INPUT: GameInput = { dx: 0, dy: 0, focus: false, target: null, dash: false, hold: false };
@@ -73,24 +64,6 @@ const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
   { value: 'wave', label: 'Wave' },
 ];
 
-function loadScores(): Record<string, number> {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(SCORES_KEY) || '{}');
-    return parsed && typeof parsed === 'object' ? parsed : {};
-  } catch { return {}; }
-}
-
-function gradeFor(hits: number, deaths: number, minutes: number) {
-  const perMin = hits / Math.max(0.5, minutes);
-  if (deaths >= 3) return 'D';
-  // Dying caps the grade, however clean the rest was
-  if (hits === 0) return 'S';
-  if (perMin <= 1 && deaths === 0) return 'A';
-  if (perMin <= 3) return 'B';
-  if (perMin <= 6) return 'C';
-  return 'D';
-}
-
 function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Difficulty): GameEngine {
   if (style === 'shapes') return new ShapesGame(analysis, difficulty);
   if (style === 'wave') return new WaveGame(analysis, difficulty);
@@ -98,12 +71,10 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  analysis, trackName, status, isPlaying, style, difficulty, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors,
+  analysis, status, isPlaying, style, difficulty, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors,
   onStyleChange, onTogglePlay, onRestart, onSeek,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scoreRef = useRef<HTMLSpanElement>(null);
-  const multRef = useRef<HTMLSpanElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
   const healthRef = useRef<HTMLSpanElement>(null);
   const progressRef = useRef<HTMLDivElement>(null);
@@ -122,7 +93,6 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   }>({ target: null, offset: null, pressed: false, touches: 0, downAt: 0, client: null, keyboardAt: null });
   const finishedRef = useRef(false);
   const [results, setResults] = useState<Results | null>(null);
-  const [practice, setPractice] = useState(false);
   /** performance.now() when the respawn countdown ends and the song resumes; null when not respawning. */
   const [respawnUntil, setRespawnUntil] = useState<number | null>(null);
   const countdownRef = useRef<HTMLDivElement>(null);
@@ -135,7 +105,6 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   if (engine !== prevEngine) {
     setPrevEngine(engine);
     setResults(null);
-    setPractice(false);
     setRespawnUntil(null);
   }
   // Resumed by hand during the countdown
@@ -143,10 +112,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   const respawning = respawnUntil !== null;
 
   const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, focus: false });
-  const propsRef = useRef({ engine, trackName, style, difficulty, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek });
+  const propsRef = useRef({ engine, style, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek });
   useEffect(() => {
     fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors };
-    propsRef.current = { engine, trackName, style, difficulty, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek };
+    propsRef.current = { engine, style, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek };
   });
 
   const toWorld = (clientX: number, clientY: number): [number, number] | null => {
@@ -169,8 +138,6 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   const updateHud = () => {
     const e = propsRef.current.engine;
     if (!e) return;
-    if (scoreRef.current) scoreRef.current.textContent = Math.floor(e.stats.score).toLocaleString();
-    if (multRef.current) multRef.current.textContent = `×${e.multiplier}`;
     if (hitsRef.current) hitsRef.current.textContent = String(e.stats.hits);
     if (healthRef.current && e.health) {
       healthRef.current.textContent = '■'.repeat(Math.max(0, e.health.hp)) + '□'.repeat(Math.max(0, e.health.max - e.health.hp));
@@ -344,7 +311,6 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       }
       redraw();
       updateHud();
-      if (e.stats.practice !== practice) setPractice(e.stats.practice);
     },
 
     start() {
@@ -356,25 +322,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     },
 
     finish() {
-      const { engine: e, trackName: name, difficulty: diff, style: st } = propsRef.current;
+      const e = propsRef.current.engine;
       if (!e || finishedRef.current) return;
       finishedRef.current = true;
-      const s = e.stats;
-      const score = Math.floor(s.score);
-      // Bullet hell keeps the original key so earlier best scores still count
-      const key = st === 'bullets' ? `${name}|${diff}` : `${name}|${diff}|${st}`;
-      const scores = loadScores();
-      const best = scores[key] ?? null;
-      const newBest = !s.practice && (best === null || score > best);
-      if (newBest) {
-        scores[key] = score;
-        try { localStorage.setItem(SCORES_KEY, JSON.stringify(scores)); } catch { /* storage full or blocked */ }
-      }
-      setResults({
-        score, hits: s.hits, grazes: s.grazes, deaths: s.deaths, maxMult: s.maxMult,
-        grade: gradeFor(s.hits, s.deaths, e.duration / 60),
-        best, newBest, practice: s.practice,
-      });
+      setResults({ hits: e.stats.hits, deaths: e.stats.deaths });
     },
   }));
 
@@ -478,18 +429,9 @@ export const Game = forwardRef<GameHandle, GameProps>(({
           </div>
         )}
         <div className={styles.stat}>
-          <span className={styles.statLabel}>Score</span>
-          <span ref={scoreRef} className={styles.statValue}>0</span>
-        </div>
-        <div className={styles.stat}>
-          <span className={styles.statLabel}>Combo</span>
-          <span ref={multRef} className={styles.statValue}>×1</span>
-        </div>
-        <div className={styles.stat}>
           <span className={styles.statLabel}>Hits</span>
           <span ref={hitsRef} className={styles.statValue}>0</span>
         </div>
-        {practice && <span className={styles.practice}>Practice</span>}
       </div>
 
       {engine?.checkpoints && (
@@ -539,7 +481,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
                     <span>Hold <kbd>Space</kbd> / <kbd>W</kbd> / <kbd>Up</kbd> / click to fly up, let go to fly down</span>
                     <span>Touch: hold anywhere</span>
                     <span><kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>The level turns on the beat. Stay between the walls; orbs on the turns score extra. Run out of health and the song rewinds to the last checkpoint.</span>
+                    <span>The level turns on the beat. Stay between the walls. Run out of health and the song rewinds to the last checkpoint.</span>
                   </div>
                 ) : shapes ? (
                   <div className={styles.help}>
@@ -555,7 +497,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
                     <span><kbd>Shift</kbd> or hold click: slow, precise movement</span>
                     <span>Touch: drag anywhere</span>
                     <span><kbd>Space</kbd> / <kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>Dodge everything. Only the white dot is your hitbox. Brushing past bullets (grazing) scores extra.</span>
+                    <span>Dodge everything. Only the white dot is your hitbox.</span>
                   </div>
                 )}
               </>
@@ -567,20 +509,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       {results && (
         <div className={styles.overlay}>
           <div className={styles.card}>
-            <div className={styles.grade}>{results.grade}</div>
-            <div className={styles.score}>{results.score.toLocaleString()}</div>
-            {results.practice ? (
-              <div className={styles.note}>Practice run (seeked), not counted for best score</div>
-            ) : results.newBest ? (
-              <div className={styles.note}>New best!</div>
-            ) : (
-              results.best !== null && <div className={styles.note}>Best: {results.best.toLocaleString()}</div>
-            )}
+            <div className={styles.title}>Song complete</div>
             <div className={styles.resultRows}>
               <span>Hits taken</span><span>{results.hits}</span>
               {!bullets && <><span>Rewinds</span><span>{results.deaths}</span></>}
-              <span>{shapes ? 'Dash dodges' : wave ? 'Orbs' : 'Grazes'}</span><span>{results.grazes}</span>
-              <span>Max combo</span><span>×{results.maxMult}</span>
             </div>
             <button className={styles.primaryBtn} onClick={onRestart}>Play again</button>
           </div>

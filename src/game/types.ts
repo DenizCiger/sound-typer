@@ -17,20 +17,12 @@ export interface GameInput {
 }
 
 export interface RunStats {
-  score: number;
   hits: number;
-  /** Bullet grazes, or hazards dashed through. */
-  grazes: number;
-  /** Seconds since the last hit. */
-  combo: number;
-  maxMult: number;
   /** Times health ran out and the song rewound to a checkpoint. */
   deaths: number;
-  /** Set once the run was seeked, so it doesn't count for a best score. */
-  practice: boolean;
 }
 
-export const newStats = (): RunStats => ({ score: 0, hits: 0, grazes: 0, combo: 0, maxMult: 1, deaths: 0, practice: false });
+export const newStats = (): RunStats => ({ hits: 0, deaths: 0 });
 
 export interface EffectSettings {
   screenshake: boolean;
@@ -51,7 +43,6 @@ export interface EffectSettings {
  */
 export interface GameEngine {
   readonly stats: RunStats;
-  readonly multiplier: number;
   /** Audio position of the last step. */
   readonly position: number;
   readonly duration: number;
@@ -72,6 +63,6 @@ export interface GameEngine {
   draw(canvas: HTMLCanvasElement, fx: EffectSettings): void;
   /** Position to rewind the song to after a death, once; null otherwise. */
   takeRewind(): number | null;
-  /** Testing: nothing hurts (the run counts as practice). */
+  /** Testing: nothing hurts. */
   invincible: boolean;
 }

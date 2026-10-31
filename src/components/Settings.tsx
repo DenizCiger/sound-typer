@@ -26,7 +26,7 @@ export interface SettingsState {
   gameStyle: GameStyle;
   /** Seconds the song stays paused on the checkpoint after running out of health. */
   respawnDelay: number;
-  /** Testing: nothing hurts in game mode; runs count as practice. */
+  /** Testing: nothing hurts in game mode. */
   invincible: boolean;
 }
 

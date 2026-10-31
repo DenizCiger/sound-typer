@@ -1,7 +1,7 @@
 import type { Hit } from '../../audio/driver';
 import { prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
-import { ARENA_H, indexAtX, lowerBound, ORB_R, sectionAt, SPEED_STAGES, type WaveChart } from './chart';
+import { ARENA_H, indexAtX, lowerBound, sectionAt, SPEED_STAGES, type WaveChart } from './chart';
 import type { WaveSim, WaveStep } from './sim';
 
 /**
@@ -146,7 +146,6 @@ export class WaveRenderer {
       this.burst(p.x, p.y, 30, INK, 50, 0.6);
       this.trail = [];
     }
-    if (res.orbs) this.burst(p.x, p.y, 10 * res.orbs, this.rgb(), 30, 0.4);
     if (res.died) this.toasts.push({ text: 'REWIND', color: INK, age: 0 });
     if (res.checkpoint) this.toasts.push({ text: 'CHECKPOINT', color: INK, age: 0 });
 
@@ -319,21 +318,6 @@ export class WaveRenderer {
       ctx.restore();
     }
     ctx.restore();
-
-    // ---- Orbs on the beat turns ----
-    const orbs = chart.orbs;
-    ctx.strokeStyle = `rgba(${INK}, 0.8)`;
-    ctx.lineWidth = 1.5;
-    for (let i = lowerBound(orbs, left); i < orbs.length && orbs[i].x < right; i++) {
-      if (sim.collected.has(i) || orbs[i].x < p.x - ORB_R) continue;
-      const o = orbs[i];
-      const s = ORB_R * u * (0.5 + 0.1 * this.pulse);
-      ctx.save();
-      ctx.translate(sx(o.x), sy(o.y));
-      ctx.rotate(Math.PI / 4);
-      ctx.strokeRect(-s / 2, -s / 2, s, s);
-      ctx.restore();
-    }
 
     for (const q of this.particles) {
       ctx.fillStyle = `rgba(${q.color}, ${q.life / q.max})`;

@@ -276,7 +276,6 @@ export default function App() {
         <Game
           ref={gameRef}
           analysis={analysis}
-          trackName={trackName}
           status={status}
           isPlaying={isPlaying}
           style={settings.gameStyle}
