@@ -78,6 +78,9 @@ export class ShapesRenderer {
   private sweep = 0;
   /** How far into a build we are, 0..1: the background winds up toward the drop. */
   private charge = 0;
+  /** How still the world is, 0..1: everything stops and dims while the music rests. */
+  private still = 0;
+  private resting = false;
 
   reset() {
     this.particles = [];
@@ -91,6 +94,8 @@ export class ShapesRenderer {
     this.section = -1;
     this.sweep = 0;
     this.charge = 0;
+    this.still = 0;
+    this.resting = false;
   }
 
   private burst(x: number, y: number, n: number, color: string, speed: number, life: number) {
@@ -138,8 +143,17 @@ export class ShapesRenderer {
     // Follow the music quickly on the way up, ease off on the way down
     const goal = sim.intensityAt(sim.position);
     this.intensity += (goal - this.intensity) * (1 - Math.exp(-dt / (goal > this.intensity ? 0.08 : 0.35)));
-    this.spin += dt * (0.04 + 0.5 * this.intensity * this.intensity + 2.5 * this.charge * this.charge);
-    const streakSpeed = 0.05 + 2.2 * this.intensity * this.intensity; // arena lengths per second
+    // A rest stops the world dead; the music coming back snaps it into motion with a flash
+    const resting = sim.chart.rests.some(([s0, s1]) => sim.position >= s0 && sim.position < s1);
+    if (this.resting && !resting && !res.rewound) {
+      this.sweep = Math.max(this.sweep, 0.8);
+      if (fx.screenshake) this.shake.kick(SHAKE_MAX_PX * 1.2 * fx.screenshakeMultiplier);
+    }
+    this.resting = resting;
+    this.still += ((resting ? 1 : 0) - this.still) * (1 - Math.exp(-dt / (resting ? 0.04 : 0.12)));
+    const motion = 1 - this.still;
+    this.spin += dt * motion * (0.04 + 0.5 * this.intensity * this.intensity + 2.5 * this.charge * this.charge);
+    const streakSpeed = motion * (0.05 + 2.2 * this.intensity * this.intensity); // arena lengths per second
     for (const st of this.streaks) {
       st.x = (st.x + Math.cos(this.streakAngle) * streakSpeed * st.z * dt + 1) % 1;
       st.y = (st.y + Math.sin(this.streakAngle) * streakSpeed * st.z * dt + 1) % 1;
@@ -221,7 +235,7 @@ export class ShapesRenderer {
     }
     for (const g of geos) {
       const scaled: Geo = g.type === 'circle' ? { ...g, r: g.r * beat }
-        : g.type === 'rect' && hz.kind !== 'bar' && hz.kind !== 'wall' ? { ...g, hw: g.hw * beat, hh: g.hh * beat } : g;
+        : g.type === 'rect' && hz.kind !== 'bar' && hz.kind !== 'wall' && hz.kind !== 'grid' ? { ...g, hw: g.hw * beat, hh: g.hh * beat } : g;
       tracePath(ctx, scaled, u, reach);
       ctx.fill();
     }
@@ -298,6 +312,15 @@ export class ShapesRenderer {
       ctx.strokeRect(-s, -s, s * 2, s * 2);
     }
     ctx.restore();
+
+    // The background dims while the music rests, so the frozen hazards stand out
+    if (this.still > 0.01) {
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = `rgba(0, 0, 0, ${0.5 * this.still})`;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
 
     // The camera always shows exactly the play area, which grows and shrinks with the music
     const scale = sim.scale;
