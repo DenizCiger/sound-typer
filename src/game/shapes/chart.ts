@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { ARENA_ASPECT, budgetWindow, hitWeights, rng, sample, scaleFor, sectionIndexAt, seedFor, snapToHit, songParts, zoomCurve, ZOOM_RATE, type BaseSection, type Coverage, type Difficulty, type HitWeights } from '../common';
+import { ARENA_ASPECT, budgetWindow, hitWeights, intensityAt, rng, sample, scaleFor, sectionIndexAt, seedFor, snapToHit, songParts, zoomCurve, ZOOM_RATE, type BaseSection, type Coverage, type Difficulty, type HitWeights } from '../common';
 
 /**
  * Just Shapes & Beats style chart: big geometric hazards that show up as a faint warning,
@@ -18,9 +18,12 @@ import { ARENA_ASPECT, budgetWindow, hitWeights, rng, sample, scaleFor, sectionI
  * out of it, so a dash is never forced.
  *
  * Sections follow the song's structure (`songParts`): each part gets a role (calm, main, build,
- * drop, break) and a colour, long parts are split into phrases, and every phrase's theme is picked
- * by the music's character (accented → bars, bassy → walls, steady → steps, dense and light →
- * rain, sparse and loud → spinner). Builds hold back and squeeze the arena; drops open with a slam.
+ * drop, break) and a colour. Builds hold back and squeeze the arena; drops open with a slam.
+ * Themes come in runs of bars (the analysis' beat grid): a run lasts as long as its bars sound
+ * alike and ends when the music changes, so attacks follow the music rather than a timer. Each
+ * run's theme is picked by its character (accented → bars, bassy and punchy → walls, steady →
+ * steps, hats → rain, sustained → spinner), and a run that sounds like an earlier one reuses its
+ * theme.
  *
  * Positions are normalized to the arena (0..1); sizes and speeds are in world units
  * (the arena's shorter side is 100). The arena itself grows and shrinks around its centre with
@@ -91,18 +94,25 @@ export type Theme = 'field' | 'bars' | 'steps' | 'walls' | 'spinner' | 'rain';
 export type Role = 'calm' | 'main' | 'build' | 'drop' | 'break';
 
 export interface ShapesSection extends BaseSection {
-  theme: Theme;
   role: Role;
   /** Song-relative intensity of the part, 0 (this song's calmest) to 1 (its most intense). */
   level: number;
-  /** First phrase of its part (parts change colour, phrases only change theme). */
-  opens: boolean;
   /** Hazard colour as "r, g, b"; parts of the same kind share it, so a returning chorus looks the same. */
   color: string;
 }
 
+/** Bars in a row that play one theme: as long as they sound alike, within one section. */
+export interface ShapesRun {
+  start: number;
+  end: number;
+  theme: Theme;
+  /** Share of the run's real hits that are kicks: steps march on those when there are enough. */
+  kicks: number;
+}
+
 export interface ShapesChart {
   sections: ShapesSection[];
+  runs: ShapesRun[];
   /** Sorted by `warn`. */
   hazards: Hazard[];
   /** Song positions the player rewinds to after running out of health. Starts with 0. */
@@ -163,8 +173,42 @@ const CALM_THEMES: Theme[] = ['field', 'rain', 'steps'];
 const ALL_THEMES: Theme[] = ['field', 'bars', 'steps', 'walls', 'spinner', 'rain'];
 /** Themes a drop leans on. */
 const BIG_THEMES: Theme[] = ['bars', 'walls', 'spinner'];
-/** Parts longer than this are split into phrases (at strong hits), each with its own theme. */
-const PHRASE_MAX = 14;
+/** A run of bars ends when a bar differs this much from the run so far (mean feature difference). */
+const RUN_CHANGE = 0.2;
+/** ...or at a four bar phrase when it differs this much, or after this many bars regardless. */
+const RUN_PHRASE_CHANGE = 0.1;
+const RUN_MAX_BARS = 8;
+/** A run that sounds this close to an earlier one plays the same theme again. */
+const RUN_RECALL = 0.07;
+/** Bars without a beat grid (silence, or no steady beat) are cut this long, seconds. */
+const BAR_FALLBACK = 2;
+/**
+ * Hits are sorted into instrument voices, and each theme gives every voice its own attack, so
+ * the screen plays the parts of the music instead of one attack taking over: a kick is mostly
+ * bass, a hat mostly treble.
+ */
+type Voice = 'kick' | 'snare' | 'hat';
+const KICK_LOW = 0.5;
+const HAT_BRIGHT = 0.5;
+const HAT_LOW = 0.3;
+/** Steps march on kicks when at least this share of a run's hits are kicks, else on hits on beats 1 and 3 (where kicks would be). */
+const STEP_KICKS = 0.2;
+/**
+ * Spinner beams live while a sustained sound holds: about as tonal as the run's average or more
+ * (and at least HOLD_TONAL) and loud enough, at least BEAM_MIN seconds (or a beat), at most
+ * BEAM_BARS bars.
+ */
+const HOLD_TONAL = 0.4;
+/** A hold ends once the tonal share falls this far below where it started counting (brief dips don't cut it). */
+const HOLD_SLACK = 0.1;
+/** Spinners only for runs with this much sustained sound on average: without held sounds, no beams. */
+const SPINNER_TONAL = 0.45;
+const HOLD_LEVEL = 0.25;
+const BEAM_BARS = 2;
+const BEAM_MIN = 0.8;
+/** Spinners and steps need some room to play out, seconds. */
+const SPINNER_MIN = 4;
+const STEPS_MIN = 2.5;
 /** A part this much more intense than the one before (song-relative), and at least DROP_LEVEL, is a drop. */
 const DROP_JUMP = 0.25;
 const DROP_LEVEL = 0.6;
@@ -215,8 +259,8 @@ const HEAVY = 0.45;
 const SLAM = 0.75;
 
 
-/** Splits the song into parts with roles and colours, then phrases with themes picked by the music. */
-function shapesSections(a: TrackAnalysis, w: HitWeights, p: Params, r: () => number): ShapesSection[] {
+/** Splits the song into parts with roles and colours; the end of the part before a drop is its build. */
+function shapesSections(a: TrackAnalysis): ShapesSection[] {
   const parts = songParts(a);
   // Song-relative scale like Wave's speed stages, with a minimum range so a flat song stays flat
   const sorted = parts.map((q) => q.inten).sort((x, y) => x - y);
@@ -229,82 +273,190 @@ function shapesSections(a: TrackAnalysis, w: HitWeights, p: Params, r: () => num
     return q.inten < CALM_INTEN || (levels[k] < 0.2 && q.inten < HEAVY_INTEN) ? 'calm' : 'main';
   });
 
-  // Each part becomes one or more spans with a role; the end of the part before a drop is its build
-  const spans: { start: number; end: number; inten: number; level: number; role: Role }[] = [];
+  const sections: ShapesSection[] = [];
   parts.forEach((q, k) => {
-    const span = { start: q.start, end: q.end, inten: q.inten, level: levels[k], role: roles[k] };
+    const color = COLORS[roles[k] === 'main' && levels[k] >= 0.55 ? 'loud' : roles[k]];
+    const sec = { start: q.start, end: q.end, energy: q.inten, level: levels[k], role: roles[k], color };
     if (roles[k + 1] === 'drop' && roles[k] !== 'drop' && q.end - q.start >= BUILD_MIN * 2) {
       const at = snapToHit(a, Math.max(q.start + BUILD_MIN, q.end - BUILD_MAX), 1);
       if (q.end - at >= BUILD_MIN && at - q.start >= BUILD_MIN) {
-        spans.push({ ...span, end: at });
-        spans.push({ ...span, start: at, role: 'build' });
+        sections.push({ ...sec, end: at });
+        sections.push({ ...sec, start: at, role: 'build', color: COLORS.build });
         return;
       }
     }
-    spans.push(span);
+    sections.push(sec);
   });
+  return sections;
+}
 
-  // Walls only come on big hits; a phrase without many would sit empty
-  const stats = (start: number, end: number) => {
-    let n = 0, heavy = 0, bass = 0, strong = 0;
-    const times: number[] = [];
+/** First index of sorted times that is >= t. */
+function lowerTime(times: Float32Array, t: number) {
+  let lo = 0, hi = times.length;
+  while (lo < hi) { const m = (lo + hi) >> 1; if (times[m] < t) lo = m + 1; else hi = m; }
+  return lo;
+}
+
+/** Bar start times from the beat grid; stretches without one are cut every BAR_FALLBACK seconds. */
+function barStarts(a: TrackAnalysis): number[] {
+  const downs: number[] = [];
+  for (let k = 0; k < a.beatTimes.length; k++) if (a.beatInBar[k] === 0) downs.push(a.beatTimes[k]);
+  const bars = [0];
+  for (const t of [...downs, a.duration]) {
+    const prev = bars[bars.length - 1];
+    // A gap much longer than a bar has no beat in it
+    for (let f = prev + BAR_FALLBACK; t - f > BAR_FALLBACK * 0.5 && t - prev > BAR_FALLBACK * 1.5; f += BAR_FALLBACK) bars.push(f);
+    if (t - bars[bars.length - 1] > 0.3 && t < a.duration) bars.push(t);
+  }
+  bars.push(a.duration);
+  return bars;
+}
+
+/** What a stretch of music does, each 0..1, for telling bars apart and picking themes. */
+interface Feel {
+  /** Real hits per bar, out of 8. */
+  dense: number;
+  /** Shares of those hits that are kicks, hats (bright), heavy. */
+  kick: number;
+  hat: number;
+  heavy: number;
+  /** Sustained sound and intensity, averaged. */
+  tonal: number;
+  inten: number;
+}
+
+const FEEL_WEIGHTS: Record<keyof Feel, number> = { dense: 1.5, kick: 1, hat: 1, heavy: 1, tonal: 1, inten: 1.5 };
+
+function feelDistance(x: Feel, y: Feel) {
+  let d = 0, n = 0;
+  for (const k of Object.keys(FEEL_WEIGHTS) as (keyof Feel)[]) { d += FEEL_WEIGHTS[k] * Math.abs(x[k] - y[k]); n += FEEL_WEIGHTS[k]; }
+  return d / n;
+}
+
+/**
+ * Groups bars into runs that each play one theme. A run goes on while its bars sound alike and
+ * ends when the music changes (or at a phrase once it has drifted, or after RUN_MAX_BARS), and
+ * never crosses a section. The theme fits the run's character; a run that sounds like an earlier
+ * one gets the same theme, so a repeating riff brings back the same attack.
+ */
+function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Params, sections: ShapesSection[], r: () => number): ShapesRun[] {
+  const bars = barStarts(a);
+  const feel = (start: number, end: number): Feel => {
+    let n = 0, kick = 0, hat = 0, heavy = 0;
     for (let i = 0; i < a.onsetTimes.length; i++) {
       const t = a.onsetTimes[i];
-      if (t < start || t >= end) continue;
-      if (w.prom[i] >= p.bigAt && w.heft[i] >= HEAVY && w.inten[i] >= HEAVY_INTEN) strong++;
-      if (w.prom[i] < 0.45) continue;
+      if (t < start || t >= end || w.prom[i] < 0.45) continue;
       n++;
-      times.push(t);
+      if (a.onsetLowness[i] > 0.5) kick++;
+      if (a.onsetBrightness[i] > 0.5) hat++;
       if (w.heft[i] >= 0.55) heavy++;
-      if (a.onsetLowness[i] > 0.5) bass++;
     }
-    // How regular the beat is: the spread of the gaps between hits against their mean
-    const gaps = times.slice(1).map((t, k) => t - times[k]);
-    const mean = gaps.reduce((s, g) => s + g, 0) / Math.max(1, gaps.length);
-    const cv = gaps.length >= 4 ? Math.sqrt(gaps.reduce((s, g) => s + (g - mean) ** 2, 0) / gaps.length) / mean : 1;
-    const len = Math.max(1, end - start);
-    return { rate: n / len, heavy: n ? heavy / n : 0, bass: n ? bass / n : 0, steady: Math.max(0, 1 - cv), punchy: strong / len >= 0.35 };
+    let tonal = 0, inten = 0, k = 0;
+    for (let t = start; t < end; t += 0.1) { tonal += sample(a.tonal, a.fps, t); inten += intensityAt(a, t); k++; }
+    const bar = (end - start) / Math.max(0.5, (60 / a.tempo) * 4);
+    return { dense: Math.min(1, n / bar / 8), kick: n ? kick / n : 0, hat: n ? hat / n : 0, heavy: n ? heavy / n : 0, tonal: k ? tonal / k : 0, inten: k ? inten / k : 0 };
   };
 
-  const sections: ShapesSection[] = [];
-  let prev: Theme | null = null;
-  for (const span of spans) {
-    const cuts = [span.start];
-    while (span.end - cuts[cuts.length - 1] > PHRASE_MAX) {
-      const next = snapToHit(a, cuts[cuts.length - 1] + 7 + r() * 4, 2);
-      if (span.end - next < 5) break;
-      cuts.push(next);
+  // Walls only come on big hits; a run without many would sit empty
+  const punchy = (start: number, end: number) => {
+    let strong = 0;
+    for (let i = 0; i < a.onsetTimes.length; i++) {
+      const t = a.onsetTimes[i];
+      if (t >= start && t < end && w.prom[i] >= p.bigAt && w.heft[i] >= HEAVY && w.inten[i] >= HEAVY_INTEN) strong++;
     }
-    cuts.push(span.end);
-    const color = COLORS[span.role === 'main' && span.level >= 0.55 ? 'loud' : span.role];
-    for (let k = 0; k + 1 < cuts.length; k++) {
-      const st = stats(cuts[k], cuts[k + 1]);
-      const calm = span.role === 'calm' || span.role === 'break' || span.role === 'build';
-      // The dice only lean: each theme is weighted by how well it fits what the music is doing
-      const weight = (t: Theme) => {
-        const fit = t === 'field' ? 0.6 + 0.6 * (1 - span.level)
-          : t === 'bars' ? 0.3 + 2 * st.heavy
-          : t === 'steps' ? 0.3 + (st.rate >= 1 ? 1.5 * st.steady : 0)
-          : t === 'walls' ? (st.punchy ? 0.3 + 2 * st.bass : 0)
-          : t === 'spinner' ? 0.3 + (st.rate < 1.5 ? 1.2 : 0.3) * span.level
-          : 0.3 + Math.min(1.5, st.rate / 3) * (1 - st.bass);
-        return span.role === 'drop' && BIG_THEMES.includes(t) ? fit * 1.8 : fit;
-      };
-      const pool = (calm ? CALM_THEMES : ALL_THEMES).filter((t) => t !== prev && weight(t) > 0);
-      let roll = r() * pool.reduce((sum, t) => sum + weight(t), 0);
-      const theme = pool.find((t) => (roll -= weight(t)) < 0) ?? pool[0] ?? 'field';
+    return strong / Math.max(1, end - start) >= 0.35;
+  };
+  // How regular the beat is: the spread of the gaps between real hits against their mean
+  const steadiness = (start: number, end: number) => {
+    const times: number[] = [];
+    for (let i = 0; i < a.onsetTimes.length; i++) if (a.onsetTimes[i] >= start && a.onsetTimes[i] < end && w.prom[i] >= 0.45) times.push(a.onsetTimes[i]);
+    const gaps = times.slice(1).map((t, k) => t - times[k]);
+    if (gaps.length < 4) return 0;
+    const mean = gaps.reduce((s, g) => s + g, 0) / gaps.length;
+    return Math.max(0, 1 - Math.sqrt(gaps.reduce((s, g) => s + (g - mean) ** 2, 0) / gaps.length) / mean);
+  };
+
+  const runs: ShapesRun[] = [];
+  const past: { feel: Feel; theme: Theme }[] = [];
+  let prev: Theme | null = null;
+  for (const sec of sections) {
+    // This section's bars, cut at its edges (a sliver of a bar there joins its neighbour)
+    const half = (60 / a.tempo) * 2;
+    const cuts = [sec.start, ...bars.filter((b) => b > sec.start + half && b < sec.end - half), sec.end];
+    const spans: [number, number][] = [];
+    let run = [cuts[0], cuts[1]], sum = feel(cuts[0], cuts[1]), count = 1;
+    for (let k = 1; k + 1 < cuts.length; k++) {
+      const f = feel(cuts[k], cuts[k + 1]);
+      const mean = Object.fromEntries(Object.entries(sum).map(([key, v]) => [key, v / count])) as unknown as Feel;
+      const d = feelDistance(f, mean);
+      if (d > RUN_CHANGE || count >= RUN_MAX_BARS || (count % 4 === 0 && d > RUN_PHRASE_CHANGE)) {
+        spans.push([run[0], run[1]]);
+        run = [cuts[k], cuts[k + 1]];
+        sum = f;
+        count = 1;
+      } else {
+        run[1] = cuts[k + 1];
+        for (const key of Object.keys(sum) as (keyof Feel)[]) sum[key] += f[key];
+        count++;
+      }
+    }
+    spans.push([run[0], run[1]]);
+
+    const calm = sec.role === 'calm' || sec.role === 'break' || sec.role === 'build';
+    for (const [start, end] of spans) {
+      const f = feel(start, end);
+      const len = end - start;
+      const fits = (t: Theme) => (calm ? CALM_THEMES : ALL_THEMES).includes(t)
+        && !(t === 'spinner' && (len < SPINNER_MIN || f.tonal < SPINNER_TONAL)) && !(t === 'steps' && len < STEPS_MIN) && !(t === 'walls' && !punchy(start, end));
+      const recall = past.find((q) => feelDistance(q.feel, f) < RUN_RECALL && fits(q.theme));
+      let theme: Theme;
+      if (recall) {
+        theme = recall.theme;
+      } else {
+        // The dice only lean: each theme is weighted by how well it fits what the music is doing
+        const steady = steadiness(start, end);
+        const weight = (t: Theme) => {
+          const fit = t === 'field' ? 0.5 + 0.6 * (1 - sec.level)
+            : t === 'bars' ? 0.3 + 2 * f.heavy
+            : t === 'steps' ? 0.2 + steady * Math.min(1, f.dense * 2)
+            : t === 'walls' ? 0.3 + 2 * f.kick
+            : t === 'spinner' ? 0.2 + 1.5 * f.tonal * (1 - f.dense)
+            : 0.2 + 1.6 * f.hat * (1 - f.kick);
+          return sec.role === 'drop' && BIG_THEMES.includes(t) ? fit * 1.8 : fit;
+        };
+        const pool = ALL_THEMES.filter((t) => fits(t) && t !== prev);
+        let roll = r() * pool.reduce((sum, t) => sum + weight(t), 0);
+        theme = pool.find((t) => (roll -= weight(t)) < 0) ?? pool[0] ?? 'field';
+        past.push({ feel: f, theme });
+      }
       prev = theme;
-      sections.push({ start: cuts[k], end: cuts[k + 1], energy: span.inten, theme, role: span.role, level: span.level, opens: k === 0, color });
+      runs.push({ start, end, theme, kicks: f.kick });
     }
   }
-  return sections;
+  return runs;
 }
 
 export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): ShapesChart {
   const p = PARAMS[difficulty];
   const r = rng(seedFor(a) ^ 0x5eed);
   const w = hitWeights(a);
-  const sections = shapesSections(a, w, p, r);
+  const sections = shapesSections(a);
+  const runs = shapesRuns(a, w, p, sections, r);
+  // The heaviest hit of each bar: walls only come on those, so there's at most one per bar
+  const barTimes = barStarts(a);
+  const barTop = new Set<number>();
+  for (let b = 0, i = 0; b + 1 < barTimes.length; b++) {
+    let top = -1;
+    for (; i < a.onsetTimes.length && a.onsetTimes[i] < barTimes[b + 1]; i++) if (top < 0 || w.heft[i] > w.heft[top]) top = i;
+    if (top >= 0) barTop.add(top);
+  }
+  /** Whether t is on a beat whose position in the bar passes `at` (0 is the downbeat). */
+  const onBeat = (t: number, at: (pos: number) => boolean) => {
+    const k = Math.min(a.beatTimes.length - 1, lowerTime(a.beatTimes, t));
+    for (const j of [k - 1, k]) if (j >= 0 && Math.abs(a.beatTimes[j] - t) < 0.07 && at(a.beatInBar[j])) return true;
+    return false;
+  };
+  const downbeat = (t: number) => onBeat(t, (pos) => pos === 0);
 
   const checkpoints = [0];
   for (const s of sections) {
@@ -332,11 +484,11 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   const warnFor = (t: number, escape: number, extra = 1) => t - Math.max(p.lead * extra, escape / PLAYER_SPEED + p.reaction);
   const spot = () => 0.15 + r() * 0.7;
 
-  // ---- Spinners: beams around a drifting pivot, driven by the music, for the whole section ----
-  const pivots = new Map<ShapesSection, (t: number) => [number, number]>();
-  for (const s of sections) {
-    if (s.theme !== 'spinner' || s.end - s.start < 4) continue;
-    const hit = s.start + 1;
+  // ---- Spinners: beams around a drifting pivot, driven by the music, while a sound holds ----
+  const pivots = new Map<ShapesRun, (t: number) => [number, number]>();
+  for (const s of runs) {
+    if (s.theme !== 'spinner' || s.end - s.start < SPINNER_MIN) continue;
+    const hit = s.start;
     const end = s.end - 0.1;
     // The pivot wanders on a slow Lissajous curve around the middle of the arena
     const fx = 0.05 + r() * 0.06, fy = 0.05 + r() * 0.06, px = r() * 6.28, py = r() * 6.28;
@@ -375,10 +527,36 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       path.y.push(y);
       path.a.push(angle);
     }
+    // Beams come in while a sustained sound (a held note, a pad, a long vocal) holds and leave
+    // when it ends, at most a couple of bars; then at least a beat before the next one (a bar
+    // after one that was cut short, so a long pad doesn't become one endless spinner again)
+    const beat = 60 / a.tempo;
+    let mean = 0, n = 0;
+    for (let t = hit; t <= end; t += step) { mean += sample(a.tonal, a.fps, t); n++; }
+    const hold = Math.max(HOLD_TONAL, mean / Math.max(1, n) - 0.05);
+    const holds: [number, number][] = [];
+    let h0 = -1, free = hit + 0.3;
+    for (let t = free; t <= end; t += step) {
+      if (h0 < 0 && t < free) continue;
+      const held = sample(a.tonal, a.fps, t) >= (h0 < 0 ? hold : hold - HOLD_SLACK) && sample(a.level, a.fps, t) >= HOLD_LEVEL;
+      if (held && h0 < 0) h0 = t;
+      const capped = h0 >= 0 && t - h0 >= beat * 4 * BEAM_BARS;
+      if (h0 >= 0 && (!held || capped || t + step > end)) {
+        const from = snapToHit(a, h0, 0.25);
+        if (t - from >= Math.max(beat, BEAM_MIN)) holds.push([from, t]);
+        h0 = -1;
+        free = t + beat * (capped ? 4 : 1);
+      }
+    }
     const beams = difficulty === 'normal' && r() < 0.5 ? 1 : p.beams;
-    for (let k = 0; k < beams; k++) {
-      const off = (k * Math.PI) / beams;
-      push({ kind: 'beam', warn: s.start, hit, end, x: 0.5, y: 0.5, a0: 0, a1: 0, width: 4.5, path: { ...path, a: path.a.map((v) => v + off) } });
+    for (const [h, e] of holds) {
+      const i0 = Math.max(0, Math.round((h - hit) / step)), i1 = Math.min(path.a.length, Math.round((e - hit) / step) + 2);
+      if (i1 - i0 < 3) continue;
+      const slice = { step, x: path.x.slice(i0, i1), y: path.y.slice(i0, i1), a: path.a.slice(i0, i1) };
+      for (let k = 0; k < beams; k++) {
+        const off = (k * Math.PI) / beams;
+        push({ kind: 'beam', warn: h - Math.max(p.lead * 1.4, 0.8), hit: h, end: e, x: 0.5, y: 0.5, a0: 0, a1: 0, width: 4.5, path: { ...slice, a: slice.a.map((v) => v + off) } });
+      }
     }
   }
 
@@ -390,8 +568,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
   // ---- Ray bursts: short beams fanning out of the spinner's pivot on big hits ----
   let lastBurst = -Infinity;
-  const burst = (t: number, sec: ShapesSection) => {
-    const pivot = pivots.get(sec);
+  const burst = (t: number, run: ShapesRun) => {
+    const pivot = pivots.get(run);
     if (!pivot || t - lastBurst < 0.9 - 0.4 * inten || budget.left(t, scale) < cost('bar')) return false;
     lastBurst = t;
     const [x, y] = pivot(t);
@@ -457,6 +635,11 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   };
   const trailBomb = (t: number) => {
     if (budget.left(t, scale) < cost('bomb')) return;
+    // A new bar turns the trail a quarter, so its path follows the bars
+    if (downbeat(t)) {
+      const turn = r() < 0.5 ? 1 : -1;
+      trail = { ...trail, dx: -trail.dy * turn, dy: trail.dx * turn };
+    }
     const size = TRAIL_RADIUS * (0.65 + 0.6 * heft);
     push({ kind: 'bomb', warn: warnFor(t, size), hit: t, end: t + 0.4 + 0.2 * heft, x: trail.x, y: trail.y, r: size });
     trail.x += trail.dx;
@@ -513,26 +696,33 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   let step = 0, stepDir = 1;
   let stepFree = -Infinity;
   let stepAxis: 'h' | 'v' = 'v';
-  let secIndex = -1;
+  const voiceOf = (i: number): Voice => a.onsetLowness[i] > KICK_LOW ? 'kick'
+    : a.onsetBrightness[i] > HAT_BRIGHT && a.onsetLowness[i] < HAT_LOW ? 'hat' : 'snare';
+  /** Whether hit i moves the steps march in this run. */
+  const steps = (i: number, run: ShapesRun) => w.prom[i] >= 0.45 && (run.kicks >= STEP_KICKS ? voiceOf(i) === 'kick' : onBeat(a.onsetTimes[i], (pos) => pos % 2 === 0));
+  let runIndex = -1;
+  let stepsSinceTurn = 0;
   let slammed = -1;
   let lastVolley = -Infinity;
 
   for (let i = 0; i < a.onsetTimes.length; i++) {
     const t = a.onsetTimes[i];
     const prom = w.prom[i];
-    const low = a.onsetLowness[i];
     inten = w.inten[i];
     // Near silence, only the hits that stand out
     if (t < 1.5 || prom < (inten < 0.1 ? 0.45 : p.shotMin)) continue;
     const si = sectionIndexAt(sections, t);
     const sec = sections[si];
     const build = sec.role === 'build';
-    if (si !== secIndex) {
-      // Fresh section: new lane orientation, starting side and trail
-      secIndex = si;
+    const ri = sectionIndexAt(runs, t);
+    const run = runs[ri];
+    if (ri !== runIndex) {
+      // Fresh run: new lane orientation, starting side and trail
+      runIndex = ri;
       stepAxis = r() < 0.5 ? 'h' : 'v';
       stepDir = r() < 0.5 ? 1 : -1;
       step = stepDir > 0 ? 0 : STEP_LANES - 1;
+      stepsSinceTurn = 0;
       newTrail();
     }
     heft = w.heft[i];
@@ -543,6 +733,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     const homing = heavy && inten >= TARGET_INTEN && r() < p.targetRatio;
     const mid = prom >= 0.45;
     const weak = !mid;
+    const voice = voiceOf(i);
     scale = (0.3 + 0.9 * inten) * (build ? BUILD_BUDGET : 1);
     const left = budget.left(t, scale);
     // In a dense stream, a lesser hit leaves room for a clearly bigger one right behind it
@@ -558,7 +749,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
     // A drop opens on its first beat with a cross of bars, bursting into shots where they meet
     // (the build before it saved up the budget for that)
-    if (sec.role === 'drop' && sec.opens && si !== slammed && t - sec.start < 0.5) {
+    if (sec.role === 'drop' && si !== slammed && t - sec.start < 0.5) {
       slammed = si;
       heft = Math.max(heft, SLAM);
       if (fullBar(t, 'h', false, 1.1)) {
@@ -577,15 +768,17 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       continue;
     }
 
-    switch (sec.theme) {
+    // Every theme gives each voice its own attack; weak hits only ever get light ones
+    switch (run.theme) {
       case 'field':
         if (heavy && left >= cost('bar') && fullBar(t, alt++ % 2 ? 'h' : 'v', homing)) break;
-        if (mid) { if (low < 0.35 || !seeker(t)) pop(t, big); }
-        else if (difficulty !== 'easy') trailBomb(t);
+        if (weak || voice === 'hat') { if (difficulty !== 'easy') trailBomb(t); }
+        else if (voice === 'kick') pop(t, big);
+        else if (!seeker(t)) pop(t, big);
         break;
 
       case 'bars':
-        if (weak) { if (p.volleys) volley(t); break; }
+        if (weak || voice === 'hat') { if (p.volleys) volley(t); break; }
         if (left < cost('bar')) break;
         {
           const axis = alt++ % 2 ? 'h' : 'v';
@@ -597,37 +790,49 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
         break;
 
       case 'steps': {
+        // The march is the kick line: it steps on kicks (on beats 1 and 3 when there are few)
+        // and pauses when they do; the other voices get their own attacks around it
+        if (!steps(i, run)) {
+          if (heavy && left >= cost('bar')) fullBar(t, stepAxis === 'h' ? 'v' : 'h', false);
+          else if (mid && voice === 'snare') pop(t, big, Math.ceil(p.pops / 2));
+          else if (p.volleys && left >= COST.bar * 1.5) volley(t);
+          break;
+        }
         // A lane only goes solid once the previous one is gone (plus some slack): the march
         // can't turn into a solid block the player has to dash through when hits come in a burst.
         // Lanes are shorter-lived in intense parts, so the march keeps up with fast music
-        if (weak || left < cost('bar') || t < stepFree) {
-          // Volleys only from what the march leaves over, so it doesn't skip beats for them
-          if (p.volleys && !big && left >= COST.bar * 1.5) volley(t);
-          break;
-        }
-        // Each lane goes away just before the march's next beat lands, so the march can step on
-        // every beat and still never has two lanes solid at once
+        if (left < cost('bar') || t < stepFree) break;
+        // Each lane goes away just before the march's next step lands, so the march can step on
+        // every one and still never has two lanes solid at once
         let life = STEP_LIFE * (1.15 - 0.45 * inten);
         for (let j = i + 1; j < a.onsetTimes.length && a.onsetTimes[j] < t + life + p.stepSlack; j++) {
-          if (w.prom[j] >= 0.45 && a.onsetTimes[j] - t >= STEP_MIN + p.stepSlack) { life = a.onsetTimes[j] - t - p.stepSlack; break; }
+          if (steps(j, run) && a.onsetTimes[j] - t >= STEP_MIN + p.stepSlack) { life = a.onsetTimes[j] - t - p.stepSlack; break; }
         }
         stepFree = t + life + p.stepSlack;
+        // The march turns around on a new bar (once it has gone a few lanes), so it phrases with
+        // the music instead of just sweeping edge to edge
+        if (downbeat(t) && stepsSinceTurn >= STEP_LANES / 2) {
+          stepDir = -stepDir;
+          step += 2 * stepDir;
+          stepsSinceTurn = 0;
+        }
         const span = 1 / STEP_LANES;
         push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + life, axis: stepAxis, at: (step + 0.5) * span, width: 0, span: span * 0.92, target: false });
         step += stepDir;
+        stepsSinceTurn++;
         if (step < 0 || step >= STEP_LANES) {
           // Bounce back from the edge, turning the march around
           stepDir = -stepDir;
           step += 2 * stepDir;
+          stepsSinceTurn = 0;
         }
-        if (heavy && low > 0.4) pop(t, true);
         break;
       }
 
       case 'walls': {
         // Walls don't scale with speed fully: a wall much faster than the player can only be dashed
         const dur = (3.6 - 1.0 * sec.energy) / Math.sqrt(p.speed);
-        if (heavy && t - lastWall > dur * p.wallSpacing && left >= cost('wall')) {
+        if (heavy && barTop.has(i) && t - lastWall > dur * p.wallSpacing && left >= cost('wall')) {
           // Keep the axis and direction within a run of walls; switch once things calm down
           if (t - lastWall > dur * 2) {
             lastAxis = r() < 0.5 ? 'h' : 'v';
@@ -646,27 +851,28 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
           push(wall);
           // The heaviest hits close in from both sides at once, gaps lined up
           if (heft >= 0.65 && difficulty !== 'easy' && budget.left(t, scale) >= cost('wall')) push({ ...wall, from: lastFrom === 0 ? 1 : 0 });
-        } else if (mid) {
+        } else if (mid && voice === 'snare') {
           pop(t, big, Math.ceil(p.pops / 2));
-        } else if (difficulty !== 'easy') {
+        } else if (difficulty !== 'easy' && voice !== 'kick') {
           trailBomb(t);
         }
         break;
       }
 
       case 'spinner':
-        // The beams already sweep the whole arena; lighter on everything else
-        if (heavy && burst(t, sec)) break;
-        if (mid && pop(t, big, Math.ceil(p.pops / 2))) break;
-        if (difficulty === 'hard' || (difficulty === 'normal' && inten > 0.5)) trailBomb(t);
+        // The beams sweep the arena while the sound holds; the hits fire around them
+        if (heavy && burst(t, run)) break;
+        if (mid && voice !== 'hat' && pop(t, big, Math.ceil(p.pops / 2))) break;
+        if (voice === 'hat' && (difficulty === 'hard' || (difficulty === 'normal' && inten > 0.5))) trailBomb(t);
         break;
 
       case 'rain':
+        // Hats and snares rain down, kicks drop seekers, the big hits pop
         if (big) {
           pop(t, true);
-        } else if (mid && low > 0.5 && seeker(t)) {
+        } else if (mid && voice === 'kick' && seeker(t)) {
           // Seeker placed
-        } else if (left >= cost('shot')) {
+        } else if (voice !== 'kick' && left >= cost('shot')) {
           const speed = (34 + 24 * heft) * p.speed * pace();
           push({ kind: 'shot', warn: t - p.lead * 0.6, hit: t, end: t + 260 / speed, x: spot(), y: -0.02, angle: Math.PI / 2 + (r() - 0.5) * 0.3, speed, r: 1.2 + 1.6 * heft });
         }
@@ -676,7 +882,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     // Nothing for a while and this hit didn't spawn anything either: fill the silence (longer
     // silences are fine when the music is calm)
     if (idle && hazards.length === before) {
-      if (p.volleys && (sec.theme === 'bars' || sec.theme === 'steps')) volley(t);
+      if (p.volleys && (run.theme === 'bars' || run.theme === 'steps')) volley(t);
       else trailBomb(t);
     }
   }
@@ -726,7 +932,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     for (let k = i; k <= Math.min(ahead[Math.min(n - 1, i)], i + ZOOM_RATE * 0.75); k++) m = Math.max(m, want[k]);
     return m;
   });
-  return { sections, hazards, checkpoints, maxHp: p.hp, dashCooldown: p.dashCooldown, zoom };
+  return { sections, runs, hazards, checkpoints, maxHp: p.hp, dashCooldown: p.dashCooldown, zoom };
 }
 
 // ---- Geometry, shared by collisions and drawing ----

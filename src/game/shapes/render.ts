@@ -125,7 +125,7 @@ export class ShapesRenderer {
     const target = (fx.partColors ? sec.color : PINK).split(',').map(Number);
     if (si !== this.section) {
       if (si < this.section || this.section < 0) this.rgb = target;
-      else if (sec.opens) {
+      else {
         this.sweep = sec.role === 'drop' ? 1 : 0.4;
         if (sec.role === 'drop' && fx.screenshake) this.shake.kick(SHAKE_MAX_PX * 1.2 * fx.screenshakeMultiplier);
       }

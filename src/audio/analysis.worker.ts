@@ -10,6 +10,11 @@ self.onmessage = (e: MessageEvent<{ id: number; samples: Float32Array; sampleRat
     result.onsetTimes.buffer,
     result.onsetStrength.buffer,
     result.onsetLowness.buffer,
+    result.onsetBrightness.buffer,
+    result.brightness.buffer,
+    result.tonal.buffer,
+    result.beatTimes.buffer,
+    result.beatInBar.buffer,
   ];
   (self as unknown as Worker).postMessage({ id, result }, transfer);
 };
