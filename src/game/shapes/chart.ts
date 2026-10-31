@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { ARENA_ASPECT, budgetWindow, buildSections, hitWeights, rng, sample, scaleFor, sectionIndexAt, seedFor, zoomCurve, ZOOM_RATE, type BaseSection, type Coverage, type Difficulty } from '../common';
+import { ARENA_ASPECT, budgetWindow, hitWeights, rng, sample, scaleFor, sectionIndexAt, seedFor, snapToHit, songParts, zoomCurve, ZOOM_RATE, type BaseSection, type Coverage, type Difficulty, type HitWeights } from '../common';
 
 /**
  * Just Shapes & Beats style chart: big geometric hazards that show up as a faint warning,
@@ -16,6 +16,11 @@ import { ARENA_ASPECT, budgetWindow, buildSections, hitWeights, rng, sample, sca
  * shots) rather than at random; circles/boxes pop up spread apart; homing is limited to small
  * seekers that never come back to back; and every hazard warns at least long enough to walk
  * out of it, so a dash is never forced.
+ *
+ * Sections follow the song's structure (`songParts`): each part gets a role (calm, main, build,
+ * drop, break) and a colour, long parts are split into phrases, and every phrase's theme is picked
+ * by the music's character (accented → bars, bassy → walls, steady → steps, dense and light →
+ * rain, sparse and loud → spinner). Builds hold back and squeeze the arena; drops open with a slam.
  *
  * Positions are normalized to the arena (0..1); sizes and speeds are in world units
  * (the arena's shorter side is 100). The arena itself grows and shrinks around its centre with
@@ -78,8 +83,22 @@ export interface BeamPath {
  */
 export type Theme = 'field' | 'bars' | 'steps' | 'walls' | 'spinner' | 'rain';
 
+/**
+ * What a part of the song does. calm/main play their theme; a build holds back and squeezes the
+ * arena in the seconds before a drop; a drop opens with a slam and leans on the big themes; a
+ * break is the calm right after something intense.
+ */
+export type Role = 'calm' | 'main' | 'build' | 'drop' | 'break';
+
 export interface ShapesSection extends BaseSection {
   theme: Theme;
+  role: Role;
+  /** Song-relative intensity of the part, 0 (this song's calmest) to 1 (its most intense). */
+  level: number;
+  /** First phrase of its part (parts change colour, phrases only change theme). */
+  opens: boolean;
+  /** Hazard colour as "r, g, b"; parts of the same kind share it, so a returning chorus looks the same. */
+  color: string;
 }
 
 export interface ShapesChart {
@@ -142,6 +161,30 @@ const COST: Record<Hazard['kind'], number> = { shot: 0.25, bomb: 0.8, box: 0.8, 
 const CHECKPOINT_EVERY = 25;
 const CALM_THEMES: Theme[] = ['field', 'rain', 'steps'];
 const ALL_THEMES: Theme[] = ['field', 'bars', 'steps', 'walls', 'spinner', 'rain'];
+/** Themes a drop leans on. */
+const BIG_THEMES: Theme[] = ['bars', 'walls', 'spinner'];
+/** Parts longer than this are split into phrases (at strong hits), each with its own theme. */
+const PHRASE_MAX = 14;
+/** A part this much more intense than the one before (song-relative), and at least DROP_LEVEL, is a drop. */
+const DROP_JUMP = 0.25;
+const DROP_LEVEL = 0.6;
+/** A part at most BREAK_LEVEL that falls this much from the one before is a break. */
+const BREAK_FALL = 0.3;
+const BREAK_LEVEL = 0.4;
+/** Below this absolute intensity a part is calm, however it compares to the rest of the song. */
+const CALM_INTEN = 0.16;
+/** The build before a drop: the last seconds of the part before it, at most and at least. */
+const BUILD_MAX = 8;
+const BUILD_MIN = 3;
+/** Builds only take hits that stand out this much, and only this share of the budget. */
+const BUILD_PROM = 0.6;
+const BUILD_BUDGET = 0.5;
+/** Seconds between volleys in a build. */
+const BUILD_VOLLEY_GAP = 1.5;
+/** The arena squeezes in to this scale by the end of a build, so the drop bursts it open. */
+const BUILD_SQUEEZE = 0.5;
+/** Hazard colours: violet for calm parts, pink and orange for the rest, amber builds, red drops. */
+const COLORS = { calm: '150, 90, 255', break: '190, 80, 255', main: '255, 36, 112', loud: '255, 110, 40', build: '255, 190, 60', drop: '255, 44, 60' };
 const STEP_LANES = 8;
 /** How long a steps lane stays solid, at most and at least. */
 const STEP_LIFE = 0.4;
@@ -171,24 +214,97 @@ const HEAVY = 0.45;
 /** Heft from which bars slam a cross and pop-ups burst into a ring of shots. */
 const SLAM = 0.75;
 
+
+/** Splits the song into parts with roles and colours, then phrases with themes picked by the music. */
+function shapesSections(a: TrackAnalysis, w: HitWeights, p: Params, r: () => number): ShapesSection[] {
+  const parts = songParts(a);
+  // Song-relative scale like Wave's speed stages, with a minimum range so a flat song stays flat
+  const sorted = parts.map((q) => q.inten).sort((x, y) => x - y);
+  const low = sorted[0], range = Math.max(0.35, sorted[sorted.length - 1] - low);
+  const levels = parts.map((q) => Math.min(1, (q.inten - low) / range));
+  const roles = parts.map((q, k): Role => {
+    const prev = k > 0 ? levels[k - 1] : levels[k];
+    if (k > 0 && levels[k] >= DROP_LEVEL && levels[k] - prev >= DROP_JUMP && q.inten >= HEAVY_INTEN) return 'drop';
+    if (k > 0 && levels[k] <= BREAK_LEVEL && prev - levels[k] >= BREAK_FALL) return 'break';
+    return q.inten < CALM_INTEN || (levels[k] < 0.2 && q.inten < HEAVY_INTEN) ? 'calm' : 'main';
+  });
+
+  // Each part becomes one or more spans with a role; the end of the part before a drop is its build
+  const spans: { start: number; end: number; inten: number; level: number; role: Role }[] = [];
+  parts.forEach((q, k) => {
+    const span = { start: q.start, end: q.end, inten: q.inten, level: levels[k], role: roles[k] };
+    if (roles[k + 1] === 'drop' && roles[k] !== 'drop' && q.end - q.start >= BUILD_MIN * 2) {
+      const at = snapToHit(a, Math.max(q.start + BUILD_MIN, q.end - BUILD_MAX), 1);
+      if (q.end - at >= BUILD_MIN && at - q.start >= BUILD_MIN) {
+        spans.push({ ...span, end: at });
+        spans.push({ ...span, start: at, role: 'build' });
+        return;
+      }
+    }
+    spans.push(span);
+  });
+
+  // Walls only come on big hits; a phrase without many would sit empty
+  const stats = (start: number, end: number) => {
+    let n = 0, heavy = 0, bass = 0, strong = 0;
+    const times: number[] = [];
+    for (let i = 0; i < a.onsetTimes.length; i++) {
+      const t = a.onsetTimes[i];
+      if (t < start || t >= end) continue;
+      if (w.prom[i] >= p.bigAt && w.heft[i] >= HEAVY && w.inten[i] >= HEAVY_INTEN) strong++;
+      if (w.prom[i] < 0.45) continue;
+      n++;
+      times.push(t);
+      if (w.heft[i] >= 0.55) heavy++;
+      if (a.onsetLowness[i] > 0.5) bass++;
+    }
+    // How regular the beat is: the spread of the gaps between hits against their mean
+    const gaps = times.slice(1).map((t, k) => t - times[k]);
+    const mean = gaps.reduce((s, g) => s + g, 0) / Math.max(1, gaps.length);
+    const cv = gaps.length >= 4 ? Math.sqrt(gaps.reduce((s, g) => s + (g - mean) ** 2, 0) / gaps.length) / mean : 1;
+    const len = Math.max(1, end - start);
+    return { rate: n / len, heavy: n ? heavy / n : 0, bass: n ? bass / n : 0, steady: Math.max(0, 1 - cv), punchy: strong / len >= 0.35 };
+  };
+
+  const sections: ShapesSection[] = [];
+  let prev: Theme | null = null;
+  for (const span of spans) {
+    const cuts = [span.start];
+    while (span.end - cuts[cuts.length - 1] > PHRASE_MAX) {
+      const next = snapToHit(a, cuts[cuts.length - 1] + 7 + r() * 4, 2);
+      if (span.end - next < 5) break;
+      cuts.push(next);
+    }
+    cuts.push(span.end);
+    const color = COLORS[span.role === 'main' && span.level >= 0.55 ? 'loud' : span.role];
+    for (let k = 0; k + 1 < cuts.length; k++) {
+      const st = stats(cuts[k], cuts[k + 1]);
+      const calm = span.role === 'calm' || span.role === 'break' || span.role === 'build';
+      // The dice only lean: each theme is weighted by how well it fits what the music is doing
+      const weight = (t: Theme) => {
+        const fit = t === 'field' ? 0.6 + 0.6 * (1 - span.level)
+          : t === 'bars' ? 0.3 + 2 * st.heavy
+          : t === 'steps' ? 0.3 + (st.rate >= 1 ? 1.5 * st.steady : 0)
+          : t === 'walls' ? (st.punchy ? 0.3 + 2 * st.bass : 0)
+          : t === 'spinner' ? 0.3 + (st.rate < 1.5 ? 1.2 : 0.3) * span.level
+          : 0.3 + Math.min(1.5, st.rate / 3) * (1 - st.bass);
+        return span.role === 'drop' && BIG_THEMES.includes(t) ? fit * 1.8 : fit;
+      };
+      const pool = (calm ? CALM_THEMES : ALL_THEMES).filter((t) => t !== prev && weight(t) > 0);
+      let roll = r() * pool.reduce((sum, t) => sum + weight(t), 0);
+      const theme = pool.find((t) => (roll -= weight(t)) < 0) ?? pool[0] ?? 'field';
+      prev = theme;
+      sections.push({ start: cuts[k], end: cuts[k + 1], energy: span.inten, theme, role: span.role, level: span.level, opens: k === 0, color });
+    }
+  }
+  return sections;
+}
+
 export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): ShapesChart {
   const p = PARAMS[difficulty];
   const r = rng(seedFor(a) ^ 0x5eed);
   const w = hitWeights(a);
-  let prev: Theme | null = null;
-  const sections: ShapesSection[] = buildSections(a, r).map((s) => {
-    // Walls only come on big hits; a section without many would sit empty
-    let strong = 0;
-    for (let i = 0; i < a.onsetTimes.length; i++) {
-      if (a.onsetTimes[i] >= s.start && a.onsetTimes[i] < s.end && w.prom[i] >= p.bigAt && w.heft[i] >= HEAVY && w.inten[i] >= HEAVY_INTEN) strong++;
-    }
-    const punchy = strong / Math.max(1, s.end - s.start) >= 0.35;
-    const pool = (s.energy < 0.3 ? CALM_THEMES : ALL_THEMES)
-      .filter((t) => t !== prev && (punchy || t !== 'walls'));
-    const theme = pool[Math.floor(r() * pool.length)];
-    prev = theme;
-    return { ...s, theme };
-  });
+  const sections = shapesSections(a, w, p, r);
 
   const checkpoints = [0];
   for (const s of sections) {
@@ -289,9 +405,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   };
 
   // ---- Rings: a slam bursts into shots flying out from where it landed ----
-  const ring = (t: number, x: number, y: number) => {
+  const ring = (t: number, x: number, y: number, force = false) => {
     const n = 6 + Math.round(4 * heft) + (difficulty === 'hard' ? 2 : 0);
-    if (difficulty === 'easy' || budget.left(t, scale) < cost('shot') * n) return;
+    if (difficulty === 'easy' || (!force && budget.left(t, scale) < cost('shot') * n)) return;
     const speed = (24 + 22 * heft) * p.speed * pace();
     const base = r() * Math.PI * 2;
     for (let k = 0; k < n; k++) {
@@ -398,6 +514,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   let stepFree = -Infinity;
   let stepAxis: 'h' | 'v' = 'v';
   let secIndex = -1;
+  let slammed = -1;
+  let lastVolley = -Infinity;
 
   for (let i = 0; i < a.onsetTimes.length; i++) {
     const t = a.onsetTimes[i];
@@ -408,6 +526,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     if (t < 1.5 || prom < (inten < 0.1 ? 0.45 : p.shotMin)) continue;
     const si = sectionIndexAt(sections, t);
     const sec = sections[si];
+    const build = sec.role === 'build';
     if (si !== secIndex) {
       // Fresh section: new lane orientation, starting side and trail
       secIndex = si;
@@ -424,7 +543,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     const homing = heavy && inten >= TARGET_INTEN && r() < p.targetRatio;
     const mid = prom >= 0.45;
     const weak = !mid;
-    scale = 0.3 + 0.9 * inten;
+    scale = (0.3 + 0.9 * inten) * (build ? BUILD_BUDGET : 1);
     const left = budget.left(t, scale);
     // In a dense stream, a lesser hit leaves room for a clearly bigger one right behind it
     if (!big) {
@@ -436,6 +555,27 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     }
     const idle = t - lastSpawn > p.idleMax * (1 + 1.5 * (1 - inten));
     const before = hazards.length;
+
+    // A drop opens on its first beat with a cross of bars, bursting into shots where they meet
+    // (the build before it saved up the budget for that)
+    if (sec.role === 'drop' && sec.opens && si !== slammed && t - sec.start < 0.5) {
+      slammed = si;
+      heft = Math.max(heft, SLAM);
+      if (fullBar(t, 'h', false, 1.1)) {
+        const y = (hazards[hazards.length - 1] as { at: number }).at;
+        if (fullBar(t, 'v', false, 1.1)) ring(t, (hazards[hazards.length - 1] as { at: number }).at, y, true);
+      }
+      continue;
+    }
+    // A build holds back for the drop: only the standout hits, mostly a trail stepping along
+    // with the roll, now and then a volley
+    if (build) {
+      if (prom >= BUILD_PROM || idle) {
+        if (big && p.volleys && t - lastVolley >= BUILD_VOLLEY_GAP) { volley(t); lastVolley = t; }
+        else trailBomb(t);
+      }
+      continue;
+    }
 
     switch (sec.theme) {
       case 'field':
@@ -566,11 +706,24 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       biggest[i] = Math.max(biggest[i], extent);
     }
   }
-  const want = cover.map((c, i) => Math.max(scaleFor(c, COVER, ZOOM_CALM, ZOOM_WIDE), Math.min(ZOOM_WIDE, biggest[i] / (100 * MAX_SPAN_SHARE))));
+  // Builds squeeze the arena in, closer the nearer the drop, so the drop bursts it open
+  // (and the look ahead stops at the drop, so it doesn't open early)
+  const squeeze = new Float32Array(n).fill(ZOOM_WIDE);
+  const ahead = new Int32Array(n).fill(n - 1);
+  for (const s of sections) {
+    if (s.role !== 'build') continue;
+    const last = Math.min(n, Math.ceil(s.end * ZOOM_RATE));
+    for (let i = Math.floor(s.start * ZOOM_RATE); i < last; i++) {
+      const k = Math.min(1, Math.max(0, (i / ZOOM_RATE - s.start) / (s.end - s.start)));
+      squeeze[i] = ZOOM_WIDE + (BUILD_SQUEEZE - ZOOM_WIDE) * Math.sqrt(k);
+      ahead[i] = last - 1;
+    }
+  }
+  const want = cover.map((c, i) => Math.max(Math.min(squeeze[i], scaleFor(c, COVER, ZOOM_CALM, ZOOM_WIDE)), Math.min(ZOOM_WIDE, biggest[i] / (100 * MAX_SPAN_SHARE))));
   const zoom = zoomCurve(a.duration, (t) => {
     const i = Math.round(t * ZOOM_RATE);
     let m = 0;
-    for (let k = i; k <= Math.min(n - 1, i + ZOOM_RATE * 0.75); k++) m = Math.max(m, want[k]);
+    for (let k = i; k <= Math.min(ahead[Math.min(n - 1, i)], i + ZOOM_RATE * 0.75); k++) m = Math.max(m, want[k]);
     return m;
   });
   return { sections, hazards, checkpoints, maxHp: p.hp, dashCooldown: p.dashCooldown, zoom };

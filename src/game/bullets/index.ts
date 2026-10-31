@@ -41,4 +41,6 @@ export class BulletGame implements GameEngine {
   draw(canvas: HTMLCanvasElement, fx: EffectSettings) { this.renderer.draw(canvas, this.sim, fx); }
 
   takeRewind() { return null; }
+
+  set invincible(on: boolean) { this.sim.invincible = on; }
 }

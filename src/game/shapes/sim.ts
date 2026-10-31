@@ -41,6 +41,8 @@ export class ShapesSim {
   active: Hazard[] = [];
   /** The zoom setting: how much the arena follows its scale curve (0 keeps it still). */
   zoomAmount = 1;
+  /** Testing: nothing hurts. Every step with it on marks the run as practice. */
+  invincible = false;
   arena: ArenaInfo = { w: 100, h: 100, scaleAt: (t) => zoomAt(this.chart.zoom, t, this.zoomAmount), targets: new Map() };
   player = { x: 50, y: 70, invuln: 0, dash: 0, cooldown: 0, dirX: 0, dirY: -1, vx: 0, vy: 0 };
   hp: number;
@@ -176,6 +178,7 @@ export class ShapesSim {
 
   step(pos: number, dt: number, input: GameInput): ShapesStep {
     const res: ShapesStep = { hit: false, died: false, dodges: 0, dashed: false, checkpoint: false, rewound: false };
+    if (this.invincible) this.stats.practice = true;
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
       if (this.expectRewind !== null && Math.abs(pos - this.expectRewind) < 0.5) {
@@ -221,7 +224,7 @@ export class ShapesSim {
     });
 
     // ---- Collisions ----
-    const safe = p.invuln > 0 || p.dash > 0;
+    const safe = p.invuln > 0 || p.dash > 0 || this.invincible;
     for (const h of this.active) {
       if (pos < h.hit) continue;
       let touching = false;

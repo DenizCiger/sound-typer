@@ -41,4 +41,6 @@ export class ShapesGame implements GameEngine {
   draw(canvas: HTMLCanvasElement, fx: EffectSettings) { this.renderer.draw(canvas, this.sim, fx); }
 
   takeRewind() { return this.sim.takeRewind(); }
+
+  set invincible(on: boolean) { this.sim.invincible = on; }
 }

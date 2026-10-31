@@ -26,11 +26,14 @@ interface GameProps {
   difficulty: Difficulty;
   /** Seconds to wait on the checkpoint after a rewind before the song resumes. */
   respawnDelay: number;
+  /** Testing: nothing hurts. */
+  invincible: boolean;
   screenshake: boolean;
   screenshakeMultiplier: number;
   shakeThreshold: number;
   glowIntensity: number;
   cameraZoom: number;
+  partColors: boolean;
   onStyleChange: (style: GameStyle) => void;
   onTogglePlay: () => void;
   onRestart: () => void;
@@ -95,7 +98,7 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  analysis, trackName, status, isPlaying, style, difficulty, respawnDelay, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom,
+  analysis, trackName, status, isPlaying, style, difficulty, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors,
   onStyleChange, onTogglePlay, onRestart, onSeek,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -139,11 +142,11 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   if (isPlaying && respawnUntil !== null) setRespawnUntil(null);
   const respawning = respawnUntil !== null;
 
-  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, focus: false });
-  const propsRef = useRef({ engine, trackName, style, difficulty, respawnDelay, isPlaying, respawning, onTogglePlay, onSeek });
+  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, focus: false });
+  const propsRef = useRef({ engine, trackName, style, difficulty, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek });
   useEffect(() => {
-    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom };
-    propsRef.current = { engine, trackName, style, difficulty, respawnDelay, isPlaying, respawning, onTogglePlay, onSeek };
+    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors };
+    propsRef.current = { engine, trackName, style, difficulty, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek };
   });
 
   const toWorld = (clientX: number, clientY: number): [number, number] | null => {
@@ -323,6 +326,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       if (!e || finishedRef.current) return;
       const input = readInput();
       fxRef.current.focus = input.focus;
+      e.invincible = propsRef.current.invincible;
       const hits = hitDriver?.step(pos, dt, HIT_PARAMS).hits ?? [];
       e.step(pos, dt, input, hits, fxRef.current);
       const rewind = e.takeRewind();

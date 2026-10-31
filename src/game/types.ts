@@ -39,6 +39,8 @@ export interface EffectSettings {
   glowIntensity: number;
   /** How much the play area grows and shrinks with the music; 0 keeps it still. */
   cameraZoom: number;
+  /** Shapes: each part of the song gets its own hazard colour; off keeps them pink. */
+  partColors: boolean;
   /** Focus held: draw the hitbox brighter. */
   focus: boolean;
 }
@@ -70,4 +72,6 @@ export interface GameEngine {
   draw(canvas: HTMLCanvasElement, fx: EffectSettings): void;
   /** Position to rewind the song to after a death, once; null otherwise. */
   takeRewind(): number | null;
+  /** Testing: nothing hurts (the run counts as practice). */
+  invincible: boolean;
 }

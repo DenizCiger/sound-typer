@@ -37,6 +37,9 @@ export class WaveSim {
   stats: RunStats = newStats();
   position = 0;
 
+  /** Testing: nothing hurts. Every step with it on marks the run as practice. */
+  invincible = false;
+
   constructor(chart: WaveChart, analysis: TrackAnalysis) {
     this.chart = chart;
     this.analysis = analysis;
@@ -114,6 +117,7 @@ export class WaveSim {
 
   step(pos: number, _dt: number, input: GameInput): WaveStep {
     const res: WaveStep = { hit: false, died: false, orbs: 0, checkpoint: false, rewound: false, jumped: false };
+    if (this.invincible) this.stats.practice = true;
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
       if (this.expectRewind !== null && Math.abs(pos - this.expectRewind) < 0.5) {
@@ -163,7 +167,7 @@ export class WaveSim {
         }
       }
 
-      if (p.invuln <= 0 && !res.hit && this.touching(t, p.x, p.y, r)) {
+      if (p.invuln <= 0 && !this.invincible && !res.hit && this.touching(t, p.x, p.y, r)) {
         res.hit = true;
         // Back onto the path, so the wave isn't stuck inside a wall when the grace runs out
         p.y = sampleAt(c.path, t);

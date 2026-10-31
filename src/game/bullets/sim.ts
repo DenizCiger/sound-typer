@@ -89,6 +89,8 @@ export class GameSim {
   position = 0;
   /** The zoom setting: how much the play area follows the music (0 keeps it still). */
   zoomAmount = 1;
+  /** Testing: nothing hurts. Every step with it on marks the run as practice. */
+  invincible = false;
   /** Play area scale, following how much of it the bullets cover. */
   private areaScale = ZOOM_CALM;
 
@@ -277,6 +279,7 @@ export class GameSim {
   }
 
   private takeHit(res: StepResult) {
+    if (this.invincible) return;
     const p = this.player;
     res.hit = true;
     this.stats.hits++;
@@ -292,6 +295,7 @@ export class GameSim {
 
   step(pos: number, dt: number, input: GameInput): StepResult {
     const res: StepResult = { hit: false, grazes: 0, fired: [], popped: [], laserFired: false };
+    if (this.invincible) this.stats.practice = true;
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
       // Jumping back to the very start is a clean restart; any other seek (or starting

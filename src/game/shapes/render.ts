@@ -1,5 +1,5 @@
 import type { Hit } from '../../audio/driver';
-import { prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
+import { prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
 import { geometry, lastKick, playArea, type Geo, type Hazard } from './chart';
 import { PLAYER_SIZE, type ShapesSim, type ShapesStep } from './sim';
@@ -70,6 +70,14 @@ export class ShapesRenderer {
   /** Background speed streaks, in world units. */
   private streaks = Array.from({ length: STREAKS }, () => ({ x: Math.random(), y: Math.random(), z: 0.4 + Math.random() * 0.6 }));
   private streakAngle = Math.PI * 0.6;
+  /** Hazard colour, easing toward the current part's; `col` is it as "r, g, b". */
+  private rgb = [255, 36, 112];
+  private col = '255, 36, 112';
+  private section = -1;
+  /** Colour wash over the screen when a new part starts, strongest on drops. */
+  private sweep = 0;
+  /** How far into a build we are, 0..1: the background winds up toward the drop. */
+  private charge = 0;
 
   reset() {
     this.particles = [];
@@ -80,6 +88,9 @@ export class ShapesRenderer {
     this.pulse = 0;
     this.zoom = 0;
     this.thump = 0;
+    this.section = -1;
+    this.sweep = 0;
+    this.charge = 0;
   }
 
   private burst(x: number, y: number, n: number, color: string, speed: number, life: number) {
@@ -105,10 +116,29 @@ export class ShapesRenderer {
       // Big hits swing the streaks around, so the background changes direction with the music
       if (h.strength > 0.85) this.streakAngle += (Math.random() < 0.5 ? -1 : 1) * (0.4 + Math.random() * 0.6);
     }
+    // Each part has its colour (unless that's turned off: always pink): ease into it, wash the
+    // screen in it when the part starts (a drop hits hard), and jump straight to it after a
+    // rewind or seek
+    const { sections } = sim.chart;
+    const si = sectionIndexAt(sections, sim.position);
+    const sec = sections[si];
+    const target = (fx.partColors ? sec.color : PINK).split(',').map(Number);
+    if (si !== this.section) {
+      if (si < this.section || this.section < 0) this.rgb = target;
+      else if (sec.opens) {
+        this.sweep = sec.role === 'drop' ? 1 : 0.4;
+        if (sec.role === 'drop' && fx.screenshake) this.shake.kick(SHAKE_MAX_PX * 1.2 * fx.screenshakeMultiplier);
+      }
+      this.section = si;
+    }
+    this.rgb = this.rgb.map((v, k) => v + (target[k] - v) * (1 - Math.exp(-dt / 0.25)));
+    this.col = this.rgb.map(Math.round).join(', ');
+    this.charge = sec.role === 'build' ? Math.min(1, Math.max(0, (sim.position - sec.start) / (sec.end - sec.start))) : this.charge * Math.exp(-dt / 0.1);
+
     // Follow the music quickly on the way up, ease off on the way down
-    const target = sim.intensityAt(sim.position);
-    this.intensity += (target - this.intensity) * (1 - Math.exp(-dt / (target > this.intensity ? 0.08 : 0.35)));
-    this.spin += dt * (0.04 + 0.5 * this.intensity * this.intensity);
+    const goal = sim.intensityAt(sim.position);
+    this.intensity += (goal - this.intensity) * (1 - Math.exp(-dt / (goal > this.intensity ? 0.08 : 0.35)));
+    this.spin += dt * (0.04 + 0.5 * this.intensity * this.intensity + 2.5 * this.charge * this.charge);
     const streakSpeed = 0.05 + 2.2 * this.intensity * this.intensity; // arena lengths per second
     for (const st of this.streaks) {
       st.x = (st.x + Math.cos(this.streakAngle) * streakSpeed * st.z * dt + 1) % 1;
@@ -140,6 +170,7 @@ export class ShapesRenderer {
     for (const t of this.toasts) t.age += dt;
     this.toasts = this.toasts.filter((t) => t.age < 1.4);
     this.flash *= Math.exp(-dt / 0.2);
+    this.sweep *= Math.exp(-dt / 0.3);
     this.pulse *= Math.exp(-dt / 0.15);
     this.thump *= Math.exp(-dt / 0.2);
     this.zoom *= Math.exp(-dt / 0.12);
@@ -164,16 +195,16 @@ export class ShapesRenderer {
         const x = Math.min(ax + aw - 2, Math.max(ax + 2, g.x)) * u, y = Math.min(ay + ah - 2, Math.max(ay + 2, g.y)) * u;
         ctx.beginPath();
         ctx.arc(x, y, (2 + 3 * (1 - k)) * u, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(${PINK}, ${0.3 + 0.5 * k})`;
+        ctx.strokeStyle = `rgba(${this.col}, ${0.3 + 0.5 * k})`;
         ctx.lineWidth = 2;
         ctx.stroke();
         return;
       }
       for (const g of geos) {
         tracePath(ctx, g.type === 'line' ? { ...g, hw: Math.max(0.3, g.hw * 0.25) } : g, u, reach);
-        ctx.fillStyle = `rgba(${PINK}, ${(0.06 + 0.16 * k) * blink})`;
+        ctx.fillStyle = `rgba(${this.col}, ${(0.06 + 0.16 * k) * blink})`;
         ctx.fill();
-        ctx.strokeStyle = `rgba(${PINK}, ${(0.25 + 0.5 * k) * blink})`;
+        ctx.strokeStyle = `rgba(${this.col}, ${(0.25 + 0.5 * k) * blink})`;
         ctx.lineWidth = 1.5;
         ctx.stroke();
       }
@@ -183,9 +214,9 @@ export class ShapesRenderer {
     // Lurching walls flash again on every jolt
     const age = pos - lastKick(hz, pos);
     const beat = 1 + 0.06 * this.pulse;
-    ctx.fillStyle = age < 0.06 ? '#fff' : `rgb(${PINK})`;
+    ctx.fillStyle = age < 0.06 ? '#fff' : `rgb(${this.col})`;
     if (fx.glowIntensity > 0) {
-      ctx.shadowColor = `rgba(${PINK}, 0.8)`;
+      ctx.shadowColor = `rgba(${this.col}, 0.8)`;
       ctx.shadowBlur = 14 * fx.glowIntensity * (0.4 + 0.6 * this.intensity + 0.5 * this.pulse);
     }
     for (const g of geos) {
@@ -204,7 +235,7 @@ export class ShapesRenderer {
     const across = hz.axis === 'v' ? ah : aw;
     const g0 = (hz.gap * across - hz.gapSize / 2) * u, g1 = (hz.gap * across + hz.gapSize / 2) * u;
     const depth = 1.5 * u;
-    ctx.fillStyle = `rgba(${PINK}, ${0.2 + 0.6 * k})`;
+    ctx.fillStyle = `rgba(${this.col}, ${0.2 + 0.6 * k})`;
     if (hz.axis === 'v') {
       const x = hz.from === 0 ? X : X + W - depth;
       ctx.fillRect(x, Y, depth, g0);
@@ -230,8 +261,8 @@ export class ShapesRenderer {
     // Bass thump: the whole arena breathes pink from the middle
     if (this.thump > 0.02) {
       const g = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, Math.hypot(w, h) / 2);
-      g.addColorStop(0, `rgba(${PINK}, ${0.16 * this.thump * (0.5 + inten)})`);
-      g.addColorStop(1, `rgba(${PINK}, 0)`);
+      g.addColorStop(0, `rgba(${this.col}, ${0.16 * this.thump * (0.5 + inten)})`);
+      g.addColorStop(1, `rgba(${this.col}, 0)`);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, w, h);
     }
@@ -254,14 +285,15 @@ export class ShapesRenderer {
       ctx.stroke();
     }
 
-    // Concentric squares pumping with the loudness, spinning faster when it's intense
+    // Concentric squares pumping with the loudness, spinning faster when it's intense; a build
+    // winds them in tight and bright toward the drop
     ctx.save();
     ctx.translate(w / 2, h / 2);
     ctx.rotate(this.spin);
-    const base = Math.min(w, h) * (0.16 + 0.05 * level + 0.04 * this.pulse);
+    const base = Math.min(w, h) * (0.16 + 0.05 * level + 0.04 * this.pulse) * (1 - 0.6 * this.charge);
     for (let i = 1; i <= 4; i++) {
       const s = base * i;
-      ctx.strokeStyle = `rgba(${PINK}, ${(0.03 + 0.08 * inten + 0.1 * this.pulse) / i})`;
+      ctx.strokeStyle = `rgba(${this.col}, ${(0.03 + 0.08 * inten + 0.1 * this.pulse + 0.3 * this.charge) / i})`;
       ctx.lineWidth = 2 + 2 * this.pulse;
       ctx.strokeRect(-s, -s, s * 2, s * 2);
     }
@@ -275,7 +307,7 @@ export class ShapesRenderer {
     const [ax, ay, aw, ah] = playArea(sim.arena, sim.position);
 
     // Arena border glows with the loudness
-    ctx.strokeStyle = `rgba(${PINK}, ${0.08 + 0.35 * level * level + 0.3 * this.pulse})`;
+    ctx.strokeStyle = `rgba(${this.col}, ${0.08 + 0.35 * level * level + 0.3 * this.pulse})`;
     ctx.lineWidth = 2 + 6 * inten * (0.5 + this.pulse);
     ctx.strokeRect(ax * u, ay * u, aw * u, ah * u);
 
@@ -323,8 +355,12 @@ export class ShapesRenderer {
 
     // ---- Overlays ----
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (this.sweep > 0.01) {
+      ctx.fillStyle = `rgba(${this.col}, ${0.35 * this.sweep})`;
+      ctx.fillRect(0, 0, w, h);
+    }
     if (this.flash > 0.01) {
-      ctx.fillStyle = `rgba(${PINK}, ${0.3 * this.flash})`;
+      ctx.fillStyle = `rgba(${this.col}, ${0.3 * this.flash})`;
       ctx.fillRect(0, 0, w, h);
     }
     for (const t of this.toasts) {
@@ -332,7 +368,7 @@ export class ShapesRenderer {
       ctx.font = `700 ${Math.round(Math.min(w, h) * 0.06)}px Inter, system-ui, sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillStyle = t.text === 'REWIND' ? `rgba(${PINK}, ${a})` : `rgba(255, 255, 255, ${a * 0.85})`;
+      ctx.fillStyle = t.text === 'REWIND' ? `rgba(${this.col}, ${a})` : `rgba(255, 255, 255, ${a * 0.85})`;
       ctx.fillText(t.text, w / 2, h * 0.3 - t.age * 12);
     }
   }

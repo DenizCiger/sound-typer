@@ -41,4 +41,6 @@ export class WaveGame implements GameEngine {
   draw(canvas: HTMLCanvasElement) { this.renderer.draw(canvas, this.sim); }
 
   takeRewind() { return this.sim.takeRewind(); }
+
+  set invincible(on: boolean) { this.sim.invincible = on; }
 }

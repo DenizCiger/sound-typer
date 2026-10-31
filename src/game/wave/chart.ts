@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { hitWeights, intensityAt, rng, sectionIndexAt, seedFor, type BaseSection, type Difficulty } from '../common';
+import { hitWeights, intensityAt, rng, sectionIndexAt, seedFor, snapToHit, songParts, type BaseSection, type Difficulty } from '../common';
 
 /**
  * Geometry Dash wave style chart. Holding flies the wave up at a fixed slope, releasing flies
@@ -144,20 +144,8 @@ const THEMES: WaveTheme[] = ['tunnel', 'saws', 'pillars'];
  */
 const LOUD_THEMES: WaveTheme[] = ['tunnel', 'saws', 'pillars', 'spam'];
 
-/** Intensity bins for finding the song's structure. */
-const BIN = 0.5;
-/** Shortest part of the song with its own speed, in bins. */
-const PART_MIN = 8;
-/** Cost of another part, against the squared error of fitting the intensity with flat parts. */
-const PART_COST = 0.1;
-/** Neighbouring parts closer than this in intensity are one part. */
-const PART_MERGE = 0.07;
 /** Parts longer than this get split (at strong hits) so the obstacles change now and then. */
 const SECTION_MAX = 16;
-/** How far a part boundary may move to land on the music's sharpest change, seconds. */
-const EDGE_REACH = 2.5;
-/** Window either side of a candidate boundary that the change is measured over. */
-const EDGE_WINDOW = 0.6;
 /** Spam comes in bursts: corridors this long, seconds, with a tunnel this long in between. */
 const SPAM_LEN = 3.5;
 const SPAM_BREAK = 2.5;
@@ -167,94 +155,6 @@ const SPAM_SLOPE = 0.2;
 const SPAM_MIN_FREE = 14;
 /** Heft from which a turn bites a tooth out of the outside wall. */
 const TOOTH_AT = 0.3;
-
-interface Part { start: number; end: number; inten: number; rate: number }
-
-/**
- * Splits the song where its intensity changes for good: an optimal fit of the intensity curve
- * with flat parts (a penalty per part, at least PART_MIN long), then merging neighbours that
- * ended up alike. Boundaries move onto the strongest hit nearby, so changes land on the drop.
- */
-function songParts(a: TrackAnalysis): Part[] {
-  const m = Math.max(1, Math.ceil(a.duration / BIN));
-  const v = new Float64Array(m);
-  for (let b = 0; b < m; b++) {
-    let sum = 0, k = 0;
-    for (let t = b * BIN; t < Math.min(a.duration, (b + 1) * BIN); t += 0.05) { sum += intensityAt(a, t); k++; }
-    v[b] = k ? sum / k : 0;
-  }
-  const p1 = new Float64Array(m + 1), p2 = new Float64Array(m + 1);
-  for (let i = 0; i < m; i++) { p1[i + 1] = p1[i] + v[i]; p2[i + 1] = p2[i] + v[i] * v[i]; }
-  const sse = (i: number, j: number) => { const s = p1[j] - p1[i]; return p2[j] - p2[i] - (s * s) / (j - i); };
-  const mean = (i: number, j: number) => (p1[j] - p1[i]) / (j - i);
-
-  let cuts: number[];
-  if (m < PART_MIN * 2) {
-    cuts = [0, m];
-  } else {
-    const best = new Float64Array(m + 1).fill(Infinity), from = new Int32Array(m + 1);
-    best[0] = 0;
-    for (let j = PART_MIN; j <= m; j++) {
-      for (let i = 0; i <= j - PART_MIN; i++) {
-        if (i > 0 && i < PART_MIN) continue;
-        const c = best[i] + sse(i, j) + PART_COST;
-        if (c < best[j]) { best[j] = c; from[j] = i; }
-      }
-    }
-    cuts = [m];
-    for (let j = m; j > 0; j = from[j]) cuts.unshift(from[j]);
-  }
-  const ranges = cuts.slice(0, -1).map((c, k) => [c, cuts[k + 1]]);
-  for (let k = 0; k + 1 < ranges.length;) {
-    if (Math.abs(mean(ranges[k][0], ranges[k][1]) - mean(ranges[k + 1][0], ranges[k + 1][1])) < PART_MERGE) {
-      ranges[k] = [ranges[k][0], ranges[k + 1][1]];
-      ranges.splice(k + 1, 1);
-      k = Math.max(0, k - 1);
-    } else k++;
-  }
-
-  // The fit only knows half-second bins of a smoothed curve, so a boundary can sit a second or
-  // two off the drop: move it to where the intensity changes most sharply the right way, then
-  // onto the hit right there
-  const STEP = 0.05;
-  const fine = new Float64Array(Math.ceil(a.duration / STEP) + 2);
-  for (let k = 1; k < fine.length; k++) fine[k] = fine[k - 1] + intensityAt(a, (k - 1) * STEP);
-  const avg = (t0: number, t1: number) => {
-    const i = Math.max(0, Math.min(fine.length - 1, Math.round(t0 / STEP)));
-    const j = Math.max(0, Math.min(fine.length - 1, Math.round(t1 / STEP)));
-    return j > i ? (fine[j] - fine[i]) / (j - i) : 0;
-  };
-  const bounds = ranges.map(([c]) => c * BIN);
-  bounds.push(a.duration);
-  for (let k = 1; k < bounds.length - 1; k++) {
-    const dir = Math.sign(mean(ranges[k][0], ranges[k][1]) - mean(ranges[k - 1][0], ranges[k - 1][1]));
-    const lo = Math.max(bounds[k - 1] + 2, bounds[k] - EDGE_REACH), hi = Math.min(bounds[k + 1] - 2, bounds[k] + EDGE_REACH);
-    let best = bounds[k], score = -Infinity;
-    for (let t = lo; t <= hi; t += STEP) {
-      const sc = dir * (avg(t, t + EDGE_WINDOW) - avg(t - EDGE_WINDOW, t)) - 0.01 * Math.abs(t - bounds[k]);
-      if (sc > score) { score = sc; best = t; }
-    }
-    bounds[k] = snapToHit(a, best, 0.35);
-  }
-  return ranges.map(([i, j], k) => {
-    const start = bounds[k], end = bounds[k + 1];
-    let hits = 0;
-    for (let h = 0; h < a.onsetTimes.length; h++) if (a.onsetTimes[h] >= start && a.onsetTimes[h] < end && a.onsetStrength[h] >= 0.3) hits++;
-    return { start, end, inten: mean(i, j), rate: hits / Math.max(1, end - start) };
-  });
-}
-
-/** The strongest hit within `reach` seconds of t (closer ones preferred), or t itself. */
-function snapToHit(a: TrackAnalysis, t: number, reach: number) {
-  let best = t, score = 0.3;
-  for (let h = 0; h < a.onsetTimes.length; h++) {
-    const d = Math.abs(a.onsetTimes[h] - t);
-    if (d > reach) continue;
-    const sc = a.onsetStrength[h] - 0.3 * d;
-    if (sc > score) { score = sc; best = a.onsetTimes[h]; }
-  }
-  return best;
-}
 
 /** Linear interpolation of a per-sample array at song time t. */
 export function sampleAt(arr: Float32Array, t: number) {

@@ -14,6 +14,8 @@ export interface SettingsState {
   glowIntensity: number;
   /** Camera zoom with the music in game mode; 0 keeps the camera still. */
   cameraZoom: number;
+  /** Shapes: hazard colour changes with the song's parts (off: always pink). */
+  partColors: boolean;
   snapToWords: boolean;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
@@ -24,6 +26,8 @@ export interface SettingsState {
   gameStyle: GameStyle;
   /** Seconds the song stays paused on the checkpoint after running out of health. */
   respawnDelay: number;
+  /** Testing: nothing hurts in game mode; runs count as practice. */
+  invincible: boolean;
 }
 
 /** How the music maps to typing. Stored separately from layout settings. */
@@ -279,6 +283,15 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
           format={(v) => (v === 0 ? 'Instant' : `${v}s`)}
           onChange={(v) => onChange({ ...settings, respawnDelay: v })}
         />
+        <div className={styles.row}>
+          <span className={styles.label}>Invincible</span>
+          <button
+            className={`${styles.toggle} ${settings.invincible ? styles.toggleOn : ''}`}
+            onClick={() => onChange({ ...settings, invincible: !settings.invincible })}
+            aria-pressed={settings.invincible}
+            aria-label="Invincible"
+          />
+        </div>
 
         <div className={styles.section}>Effects</div>
         <div className={styles.row}>
@@ -332,6 +345,15 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
           format={(v) => (v === 0 ? 'Off' : formatMultiplier(v))}
           onChange={(v) => onChange({ ...settings, cameraZoom: v })}
         />
+        <div className={styles.row}>
+          <span className={styles.label}>Part colours</span>
+          <button
+            className={`${styles.toggle} ${settings.partColors ? styles.toggleOn : ''}`}
+            onClick={() => onChange({ ...settings, partColors: !settings.partColors })}
+            aria-pressed={settings.partColors}
+            aria-label="Part colours"
+          />
+        </div>
 
         <div className={styles.section}>Layout</div>
         <div className={styles.row}>
