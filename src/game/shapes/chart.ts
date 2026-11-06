@@ -180,7 +180,10 @@ const PARAMS: Record<Difficulty, Params> = {
 };
 
 const COST: Record<Hazard['kind'], number> = { shot: 0.25, bomb: 0.8, box: 0.8, bar: 1, wall: 2, beam: 0, grid: 2.5 };
+/** Seconds between checkpoints, at least and at most; none this close to the song's end. */
 const CHECKPOINT_EVERY = 25;
+const CHECKPOINT_MAX = 35;
+const CHECKPOINT_END = 8;
 const CALM_THEMES: Theme[] = ['field', 'rain', 'steps'];
 const ALL_THEMES: Theme[] = ['field', 'bars', 'steps', 'walls', 'spinner', 'rain', 'grid'];
 /** Themes a drop leans on. */
@@ -709,9 +712,16 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   };
   const downbeat = (t: number) => onBeat(t, (pos) => pos === 0);
 
+  // Checkpoints sit where the music changes: a new section if one comes in time, else a new run,
+  // else a bar line, so a long section can't leave the player replaying minutes of it
   const checkpoints = [0];
-  for (const s of sections) {
-    if (s.start - checkpoints[checkpoints.length - 1] >= CHECKPOINT_EVERY && a.duration - s.start > 8) checkpoints.push(s.start);
+  for (;;) {
+    const last = checkpoints[checkpoints.length - 1];
+    const lo = last + CHECKPOINT_EVERY, hi = last + CHECKPOINT_MAX;
+    const within = (t: number) => t >= lo && t <= hi;
+    const next = sections.find((s) => within(s.start))?.start ?? runs.find((s) => within(s.start))?.start ?? barTimes.find(within) ?? hi;
+    if (a.duration - next <= CHECKPOINT_END) break;
+    checkpoints.push(next);
   }
 
   const hazards: Hazard[] = [];
