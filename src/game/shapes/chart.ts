@@ -186,6 +186,8 @@ const BIG_THEMES: Theme[] = ['bars', 'walls', 'spinner', 'grid'];
 /** Grid cell size, world units, and how long a flash stays solid. */
 const GRID_CELL = 22;
 const GRID_LIFE = 0.3;
+/** Empty bars after a flash and its counter-flash before the grid may flash again. */
+const GRID_REST_BARS = 2;
 /**
  * Rests: the loudness falls below REST_DROP of the second before (while music was playing, at
  * least REST_PLAYING), stays down REST_MIN..REST_MAX seconds and comes back past REST_BACK on a
@@ -205,6 +207,9 @@ const RUN_PHRASE_CHANGE = 0.1;
 const RUN_MAX_BARS = 8;
 /** A run that sounds this close to an earlier one plays the same theme again. */
 const RUN_RECALL = 0.07;
+/** A theme is recalled at most RECENT_MAX times in the last RECENT_RUNS runs, and each use there makes rolling it less likely. */
+const RECENT_RUNS = 6;
+const RECENT_MAX = 2;
 /** Bars without a beat grid (silence, or no steady beat) are cut this long, seconds. */
 const BAR_FALLBACK = 2;
 /**
@@ -219,9 +224,9 @@ const HAT_LOW = 0.3;
 /** Steps march on kicks when at least this share of a run's hits are kicks, else on hits on beats 1 and 3 (where kicks would be). */
 const STEP_KICKS = 0.2;
 /**
- * Spinner beams live while a sustained sound holds: about as tonal as the run's average or more
- * (and at least HOLD_TONAL) and loud enough, at least BEAM_MIN seconds (or a beat), at most
- * BEAM_BARS bars.
+ * Spinner beams live while a sustained sound holds (`beamHolds`): about as tonal as the run's
+ * average or more (and at least HOLD_TONAL) and loud enough. A hold the music cuts short still
+ * needs BEAM_MIN seconds (or a beat) to be worth a beam; at most BEAM_BARS bars.
  */
 const HOLD_TONAL = 0.4;
 /** A hold ends once the tonal share falls this far below where it started counting (brief dips don't cut it). */
@@ -364,6 +369,59 @@ function barStarts(a: TrackAnalysis): number[] {
   return bars;
 }
 
+/**
+ * When a spinner's beams are out in a run: while a sustained sound (a held note, a pad, a long
+ * vocal) holds. They stay at least a bar unless the music really drops, at most BEAM_BARS bars,
+ * and leave on a beat; then at least a beat before the next one (a bar after one that hit the
+ * cap, so a long pad doesn't become one endless spinner again).
+ */
+function beamHolds(a: TrackAnalysis, start: number, runEnd: number): [number, number][] {
+  const step = 0.05;
+  const end = runEnd - 0.1;
+  const beat = 60 / a.tempo;
+  const bar = beat * 4;
+  // Averaged over a beat, so the kicks punching holes in a pad don't read as the pad ending
+  const smooth = (curve: Float32Array) => {
+    const sums = [0];
+    for (let t = start; t <= end + step; t += step) sums.push(sums[sums.length - 1] + sample(curve, a.fps, t));
+    const reach = Math.max(1, Math.round(beat / 2 / step));
+    return (t: number) => {
+      const k = Math.round((t - start) / step);
+      const i0 = Math.max(0, k - reach), i1 = Math.min(sums.length - 1, k + reach + 1);
+      return (sums[i1] - sums[i0]) / Math.max(1, i1 - i0);
+    };
+  };
+  const tonal = smooth(a.tonal), level = smooth(a.level);
+  let mean = 0, n = 0;
+  for (let t = start; t <= end; t += step) { mean += sample(a.tonal, a.fps, t); n++; }
+  const hold = Math.max(HOLD_TONAL, mean / Math.max(1, n) - 0.05);
+
+  const holds: [number, number][] = [];
+  let t = start + 0.3;
+  while (t <= end) {
+    if (tonal(t) < hold || level(t) < HOLD_LEVEL) { t += step; continue; }
+    const from = snapToHit(a, t, 0.25);
+    const cap = from + bar * BEAM_BARS;
+    // Follow the sound; a dip of up to a beat doesn't end it, the music dropping out does
+    let last = t, dropped = false, capped = false;
+    for (let u = t; u <= end; u += step) {
+      if (level(u) < HOLD_LEVEL) { dropped = true; break; }
+      if (u >= cap) { capped = true; last = cap; break; }
+      if (tonal(u) >= hold - HOLD_SLACK) last = u;
+      else if (u - last > beat) break;
+      if (u + step > end) last = end;
+    }
+    let e = dropped ? last : Math.max(last, from + bar);
+    // Leave on the next beat, when there's a beat grid around here
+    const k = lowerTime(a.beatTimes, e);
+    if (!capped && !dropped && k < a.beatTimes.length && a.beatTimes[k] - e < beat * 1.1) e = a.beatTimes[k];
+    e = Math.min(e, end, cap);
+    if (e - from >= Math.max(beat, BEAM_MIN)) holds.push([from, e]);
+    t = Math.max(t + step, e + beat * (capped ? 4 : 1));
+  }
+  return holds;
+}
+
 /** What a stretch of music does, each 0..1, for telling bars apart and picking themes. */
 interface Feel {
   /** Real hits per bar, out of 8. */
@@ -460,8 +518,9 @@ function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Params, sections: Shapes
       const f = feel(start, end);
       const len = end - start;
       const fits = (t: Theme) => (calm ? CALM_THEMES : ALL_THEMES).includes(t)
-        && !(t === 'spinner' && (len < SPINNER_MIN || f.tonal < SPINNER_TONAL)) && !(t === 'steps' && len < STEPS_MIN) && !(t === 'walls' && !punchy(start, end));
-      const recall = past.find((q) => feelDistance(q.feel, f) < RUN_RECALL && fits(q.theme));
+        && !(t === 'spinner' && (len < SPINNER_MIN || f.tonal < SPINNER_TONAL || beamHolds(a, start, end).length === 0)) && !(t === 'steps' && len < STEPS_MIN) && !(t === 'walls' && !punchy(start, end));
+      const uses = (t: Theme) => runs.slice(-RECENT_RUNS).filter((q) => q.theme === t).length;
+      const recall = past.find((q) => feelDistance(q.feel, f) < RUN_RECALL && q.theme !== prev && uses(q.theme) < RECENT_MAX && fits(q.theme));
       let theme: Theme;
       if (recall) {
         theme = recall.theme;
@@ -474,9 +533,9 @@ function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Params, sections: Shapes
             : t === 'steps' ? 0.2 + steady * Math.min(1, f.dense * 2)
             : t === 'walls' ? 0.3 + 2 * f.kick
             : t === 'spinner' ? 0.2 + 1.5 * f.tonal * (1 - f.dense)
-            : t === 'grid' ? 0.2 + 1.6 * f.kick * steady
+            : t === 'grid' ? 0.1 + 0.7 * f.kick * steady
             : 0.2 + 1.6 * f.hat * (1 - f.kick);
-          return sec.role === 'drop' && BIG_THEMES.includes(t) ? fit * 1.8 : fit;
+          return (sec.role === 'drop' && BIG_THEMES.includes(t) ? fit * 1.8 : fit) / (1 + uses(t));
         };
         const pool = ALL_THEMES.filter((t) => fits(t) && t !== prev);
         let roll = r() * pool.reduce((sum, t) => sum + weight(t), 0);
@@ -584,28 +643,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       path.y.push(y);
       path.a.push(angle);
     }
-    // Beams come in while a sustained sound (a held note, a pad, a long vocal) holds and leave
-    // when it ends, at most a couple of bars; then at least a beat before the next one (a bar
-    // after one that was cut short, so a long pad doesn't become one endless spinner again)
-    let mean = 0, n = 0;
-    for (let t = hit; t <= end; t += step) { mean += sample(a.tonal, a.fps, t); n++; }
-    const hold = Math.max(HOLD_TONAL, mean / Math.max(1, n) - 0.05);
-    const holds: [number, number][] = [];
-    let h0 = -1, free = hit + 0.3;
-    for (let t = free; t <= end; t += step) {
-      if (h0 < 0 && t < free) continue;
-      const held = sample(a.tonal, a.fps, t) >= (h0 < 0 ? hold : hold - HOLD_SLACK) && sample(a.level, a.fps, t) >= HOLD_LEVEL;
-      if (held && h0 < 0) h0 = t;
-      const capped = h0 >= 0 && t - h0 >= beat * 4 * BEAM_BARS;
-      if (h0 >= 0 && (!held || capped || t + step > end)) {
-        const from = snapToHit(a, h0, 0.25);
-        if (t - from >= Math.max(beat, BEAM_MIN)) holds.push([from, t]);
-        h0 = -1;
-        free = t + beat * (capped ? 4 : 1);
-      }
-    }
     const beams = difficulty === 'normal' && r() < 0.5 ? 1 : p.beams;
-    for (const [h, e] of holds) {
+    for (const [h, e] of beamHolds(a, s.start, s.end)) {
       const i0 = Math.max(0, Math.round((h - hit) / step)), i1 = Math.min(path.a.length, Math.round((e - hit) / step) + 2);
       if (i1 - i0 < 3) continue;
       const slice = { step, x: path.x.slice(i0, i1), y: path.y.slice(i0, i1), a: path.a.slice(i0, i1) };
@@ -723,16 +762,25 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     }
   };
 
-  // ---- Grid: half the arena flashes on the bar's big hit, the other half the next time ----
+  // ---- Grid: half the arena flashes on the bar's big hit, the other half on the next bar's, then
+  // it rests for a while (the run's other attacks carry on) ----
   let gridFree = -Infinity;
   let gridParity: 0 | 1 = 0;
+  let gridOpen = false;
+  let gridLast = -Infinity;
   const grid = (t: number) => {
     // Warned long enough to walk off a cell, with walking time after the last flash too
     const walk = GRID_CELL / 2 / PLAYER_SPEED + p.reaction;
     if (difficulty === 'easy' || t < gridFree || budget.left(t, scale) < cost('grid')) return false;
+    // Only a flash right after the last one answers it; otherwise this one opens a new pair
+    const answer = gridOpen && t - gridLast <= 2 * 4 * beat;
     gridParity = gridParity ? 0 : 1;
     push({ kind: 'grid', warn: warnFor(t, GRID_CELL / 2), hit: t, end: t + GRID_LIFE, cell: GRID_CELL, parity: gridParity, fill: 0.92 });
     gridFree = t + GRID_LIFE + walk;
+    // (the bars' heaviest hits wobble around the bar line, hence the slack)
+    if (answer) gridFree = Math.max(gridFree, t + (GRID_REST_BARS + 1) * 4 * beat - 0.1);
+    gridOpen = !answer;
+    gridLast = t;
     return true;
   };
 
@@ -1023,7 +1071,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       case 'bar': if (h.span) c.fixed = h.span; else c.line = h.width / (h.axis === 'h' ? H : W); break;
       case 'wall': c.line = h.width / (h.axis === 'h' ? H : W); break;
       case 'beam': c.line = (h.width * Math.hypot(W, H)) / (W * H); break;
-      case 'grid': c.fixed = 0.5 * h.fill * h.fill; break;
+      // Its cells fit whatever the area is and it's gone in a blink: no reason to zoom out for it
+      case 'grid': break;
     }
     for (let i = Math.max(0, Math.floor(h.warn * ZOOM_RATE)); i < Math.min(n, Math.ceil(h.end * ZOOM_RATE)); i++) {
       cover[i].fixed += c.fixed;
