@@ -1,4 +1,4 @@
-import type { TrackAnalysis } from '../../audio/analysis';
+import { PRINT_CHROMA, PRINT_FPS, PRINT_SIZE, type TrackAnalysis } from '../../audio/analysis';
 import { ARENA_ASPECT, budgetWindow, hitWeights, intensityAt, rng, sample, scaleFor, sectionIndexAt, seedFor, snapToHit, songParts, zoomCurve, ZOOM_RATE, type BaseSection, type Coverage, type Difficulty, type HitWeights } from '../common';
 
 /**
@@ -116,6 +116,8 @@ export interface ShapesRun {
   theme: Theme;
   /** Share of the run's real hits that are kicks: steps march on those when there are enough. */
   kicks: number;
+  /** Seeds the run's placement: a run repeating an earlier one shares its seed, so it lays out the same. */
+  seed: number;
 }
 
 export interface ShapesChart {
@@ -207,9 +209,34 @@ const RUN_PHRASE_CHANGE = 0.1;
 const RUN_MAX_BARS = 8;
 /** A run that sounds this close to an earlier one plays the same theme again. */
 const RUN_RECALL = 0.07;
-/** A theme is recalled at most RECENT_MAX times in the last RECENT_RUNS runs, and each use there makes rolling it less likely. */
+/** Each use of a theme in the last RECENT_RUNS runs makes rolling it less likely; the grid isn't recalled past RECENT_MAX uses or right after itself. */
 const RECENT_RUNS = 6;
 const RECENT_MAX = 2;
+/**
+ * Repeats (`songRepeats`): stretches of at least REPEAT_MIN beats that sound like the music at
+ * least REPEAT_LAG beats earlier (16 bars, so a 4 bar loop isn't a repeat of itself and can still
+ * change attacks). Beats are alike above the REPEAT_TOP share of the track's beat pairs, and at
+ * least REPEAT_SIM; REPEAT_GAP unlike beats in a row don't end a stretch. A run takes after what
+ * it repeats when at least REPEAT_SHARE of it is a repeat.
+ */
+const REPEAT_MIN = 16;
+const REPEAT_LAG = 64;
+const REPEAT_TOP = 0.85;
+const REPEAT_SIM = 0.45;
+const REPEAT_GAP = 4;
+const REPEAT_SHARE = 0.5;
+/**
+ * Held notes become beams whatever the theme is, the way a spinner's do: at least NOTE_BEAM_MIN
+ * seconds and at least NOTE_BEAM_LEVEL loud, with `noteStrength` * (0.5 + level) at least
+ * NOTE_BEAM_STRENGTH (one trumpet in a full orchestra takes little of the energy, but the louder
+ * the music the less it needs). Notes this close together (NOTE_JOIN, seconds) are one phrase, one
+ * beam; from NOTE_CROSS two beams.
+ */
+const NOTE_BEAM_MIN = 1.5;
+const NOTE_BEAM_STRENGTH = 0.45;
+const NOTE_BEAM_LEVEL = 0.3;
+const NOTE_JOIN = 0.25;
+const NOTE_CROSS = 0.6;
 /** Bars without a beat grid (silence, or no steady beat) are cut this long, seconds. */
 const BAR_FALLBACK = 2;
 /**
@@ -370,6 +397,85 @@ function barStarts(a: TrackAnalysis): number[] {
 }
 
 /**
+ * Finds what repeats (a refrain coming back) by comparing what every beat sounds like with every
+ * earlier beat, looking for diagonals. Works on beats rather than bars, since downbeats are the
+ * least reliable part of the grid. Returns where a time was first heard: -1 if it's new.
+ */
+function songRepeats(a: TrackAnalysis): (t: number) => number {
+  const beats = a.beatTimes.length >= REPEAT_LAG ? a.beatTimes : Float32Array.from({ length: Math.floor(a.duration * 2) }, (_, k) => k / 2);
+  const n = beats.length;
+  const none = new Int32Array(n).fill(-1);
+  const at = (o: Int32Array) => (t: number) => {
+    const k = lowerTime(beats, t + 0.001) - 1;
+    return k < 0 || k >= n || o[k] < 0 ? -1 : beats[o[k]] + t - beats[k];
+  };
+  if (n <= REPEAT_LAG) return at(none);
+
+  // Per beat: its average print, against the track's average (what's always there says nothing)
+  const prints = a.print.length / PRINT_SIZE;
+  const v = new Float32Array(n * PRINT_SIZE);
+  const mean = new Float32Array(PRINT_SIZE);
+  for (let k = 0; k < n; k++) {
+    const p0 = Math.min(prints - 1, Math.floor(beats[k] * PRINT_FPS));
+    const p1 = Math.min(prints, Math.max(p0 + 1, Math.floor((k + 1 < n ? beats[k + 1] : beats[k] + 0.5) * PRINT_FPS)));
+    for (let d = 0; d < PRINT_SIZE; d++) {
+      let s = 0;
+      for (let q = p0; q < p1; q++) s += a.print[q * PRINT_SIZE + d];
+      v[k * PRINT_SIZE + d] = s / Math.max(1, p1 - p0);
+      mean[d] += v[k * PRINT_SIZE + d] / n;
+    }
+  }
+  // Harmony and timbre count separately, each scaled to unit length
+  for (let k = 0; k < n; k++) {
+    let c = 0, s = 0;
+    for (let d = 0; d < PRINT_SIZE; d++) {
+      const x = (v[k * PRINT_SIZE + d] -= mean[d]);
+      if (d < PRINT_CHROMA) c += x * x; else s += x * x;
+    }
+    c = Math.sqrt(c) || 1;
+    s = Math.sqrt(s) || 1;
+    for (let d = 0; d < PRINT_SIZE; d++) v[k * PRINT_SIZE + d] /= d < PRINT_CHROMA ? c : s;
+  }
+  const sim = (i: number, j: number) => {
+    let c = 0, s = 0;
+    for (let d = 0; d < PRINT_SIZE; d++) {
+      const x = v[i * PRINT_SIZE + d] * v[j * PRINT_SIZE + d];
+      if (d < PRINT_CHROMA) c += x; else s += x;
+    }
+    return 0.6 * c + 0.4 * s;
+  };
+  const sample: number[] = [];
+  for (let i = REPEAT_LAG; i < n; i += 3) for (let j = (i % 5); j <= i - REPEAT_LAG; j += 5) sample.push(sim(i, j));
+  if (sample.length === 0) return at(none);
+  sample.sort((x, y) => x - y);
+  const like = Math.max(REPEAT_SIM, sample[Math.floor((sample.length - 1) * REPEAT_TOP)]);
+
+  const stretches: { from: number; to: number; lag: number; score: number }[] = [];
+  for (let lag = REPEAT_LAG; lag < n; lag++) {
+    let from = -1, last = -1, sum = 0;
+    const flush = () => {
+      if (from >= 0 && last - from + 1 >= REPEAT_MIN) stretches.push({ from, to: last, lag, score: sum });
+      from = -1;
+      sum = 0;
+    };
+    for (let i = lag; i < n; i++) {
+      const s = sim(i, i - lag);
+      if (s >= like) {
+        if (from < 0) from = i;
+        last = i;
+        sum += s;
+      } else if (from >= 0 && i - last > REPEAT_GAP) flush();
+    }
+    flush();
+  }
+  // The longest, closest matches first; each beat keeps the first one it's in
+  stretches.sort((x, y) => y.score - x.score);
+  const origin = new Int32Array(n).fill(-1);
+  for (const q of stretches) for (let i = q.from; i <= q.to; i++) if (origin[i] < 0) origin[i] = i - q.lag;
+  return at(origin);
+}
+
+/**
  * When a spinner's beams are out in a run: while a sustained sound (a held note, a pad, a long
  * vocal) holds. They stay at least a bar unless the music really drops, at most BEAM_BARS bars,
  * and leave on a beat; then at least a beat before the next one (a bar after one that hit the
@@ -488,43 +594,47 @@ function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Params, sections: Shapes
   };
 
   const runs: ShapesRun[] = [];
-  const past: { feel: Feel; theme: Theme }[] = [];
+  const past: { feel: Feel; theme: Theme; seed: number }[] = [];
   let prev: Theme | null = null;
-  for (const sec of sections) {
-    // This section's bars, cut at its edges (a sliver of a bar there joins its neighbour)
-    const half = (60 / a.tempo) * 2;
-    const cuts = [sec.start, ...bars.filter((b) => b > sec.start + half && b < sec.end - half), sec.end];
-    const spans: [number, number][] = [];
-    let run = [cuts[0], cuts[1]], sum = feel(cuts[0], cuts[1]), count = 1;
-    for (let k = 1; k + 1 < cuts.length; k++) {
-      const f = feel(cuts[k], cuts[k + 1]);
-      const mean = Object.fromEntries(Object.entries(sum).map(([key, v]) => [key, v / count])) as unknown as Feel;
-      const d = feelDistance(f, mean);
-      if (d > RUN_CHANGE || count >= RUN_MAX_BARS || (count % 4 === 0 && d > RUN_PHRASE_CHANGE)) {
-        spans.push([run[0], run[1]]);
-        run = [cuts[k], cuts[k + 1]];
-        sum = f;
-        count = 1;
-      } else {
-        run[1] = cuts[k + 1];
-        for (const key of Object.keys(sum) as (keyof Feel)[]) sum[key] += f[key];
-        count++;
-      }
+  let seeds = 0;
+  const origin = songRepeats(a);
+  const runAt = (t: number) => (runs.length && t >= runs[0].start && t < runs[runs.length - 1].end ? runs[sectionIndexAt(runs, t)] : null);
+  /** The earlier run this stretch mostly repeats, if it does. */
+  const repeated = (start: number, end: number) => {
+    const votes = new Map<ShapesRun, number>();
+    let n = 0, best: ShapesRun | null = null, most = 0;
+    for (let t = start; t < end; t += 0.25) {
+      n++;
+      const o = origin(t);
+      const q = o >= 0 ? runAt(o) : null;
+      if (!q) continue;
+      const c = (votes.get(q) ?? 0) + 1;
+      votes.set(q, c);
+      if (c > most) { most = c; best = q; }
     }
-    spans.push([run[0], run[1]]);
-
+    return most >= n * REPEAT_SHARE ? best : null;
+  };
+  for (const sec of sections) {
     const calm = sec.role === 'calm' || sec.role === 'break' || sec.role === 'build';
-    for (const [start, end] of spans) {
+    /** Settles a run's theme as soon as it's cut, so later repeats can look it up. */
+    const commit = (start: number, end: number) => {
       const f = feel(start, end);
       const len = end - start;
       const fits = (t: Theme) => (calm ? CALM_THEMES : ALL_THEMES).includes(t)
         && !(t === 'spinner' && (len < SPINNER_MIN || f.tonal < SPINNER_TONAL || beamHolds(a, start, end).length === 0)) && !(t === 'steps' && len < STEPS_MIN) && !(t === 'walls' && !punchy(start, end));
       const uses = (t: Theme) => runs.slice(-RECENT_RUNS).filter((q) => q.theme === t).length;
-      const recall = past.find((q) => feelDistance(q.feel, f) < RUN_RECALL && q.theme !== prev && uses(q.theme) < RECENT_MAX && fits(q.theme));
+      const copy = repeated(start, end);
+      const recall = past.find((q) => feelDistance(q.feel, f) < RUN_RECALL && fits(q.theme) && (q.theme !== 'grid' || (prev !== 'grid' && uses('grid') < RECENT_MAX)));
       let theme: Theme;
-      if (recall) {
+      let seed = seeds;
+      if (copy && fits(copy.theme)) {
+        theme = copy.theme;
+        seed = copy.seed;
+      } else if (recall) {
         theme = recall.theme;
+        seed = recall.seed;
       } else {
+        seeds++;
         // The dice only lean: each theme is weighted by how well it fits what the music is doing
         const steady = steadiness(start, end);
         const weight = (t: Theme) => {
@@ -540,18 +650,46 @@ function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Params, sections: Shapes
         const pool = ALL_THEMES.filter((t) => fits(t) && t !== prev);
         let roll = r() * pool.reduce((sum, t) => sum + weight(t), 0);
         theme = pool.find((t) => (roll -= weight(t)) < 0) ?? pool[0] ?? 'field';
-        past.push({ feel: f, theme });
+        past.push({ feel: f, theme, seed });
       }
       prev = theme;
-      runs.push({ start, end, theme, kicks: f.kick });
+      runs.push({ start, end, theme, kicks: f.kick, seed });
+    };
+
+    // This section's bars, cut at its edges (a sliver of a bar there joins its neighbour)
+    const half = (60 / a.tempo) * 2;
+    const cuts = [sec.start, ...bars.filter((b) => b > sec.start + half && b < sec.end - half), sec.end];
+    let run = [cuts[0], cuts[1]], sum = feel(cuts[0], cuts[1]), count = 1;
+    for (let k = 1; k + 1 < cuts.length; k++) {
+      const f = feel(cuts[k], cuts[k + 1]);
+      const mean = Object.fromEntries(Object.entries(sum).map(([key, v]) => [key, v / count])) as unknown as Feel;
+      const d = feelDistance(f, mean);
+      // While repeating something, runs change where they changed the first time
+      const o0 = origin(cuts[k - 1]), o1 = origin(cuts[k]);
+      const q0 = o0 >= 0 ? runAt(o0) : null, q1 = o1 >= 0 ? runAt(o1) : null;
+      const following = q0 && q1 && Math.abs(o1 - cuts[k] - (o0 - cuts[k - 1])) < 0.3;
+      if (following ? q0 !== q1 : d > RUN_CHANGE || count >= RUN_MAX_BARS || (count % 4 === 0 && d > RUN_PHRASE_CHANGE)) {
+        commit(run[0], run[1]);
+        run = [cuts[k], cuts[k + 1]];
+        sum = f;
+        count = 1;
+      } else {
+        run[1] = cuts[k + 1];
+        for (const key of Object.keys(sum) as (keyof Feel)[]) sum[key] += f[key];
+        count++;
+      }
     }
+    commit(run[0], run[1]);
   }
   return runs;
 }
 
 export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): ShapesChart {
   const p = PARAMS[difficulty];
-  const r = rng(seedFor(a) ^ 0x5eed);
+  const seed0 = seedFor(a) ^ 0x5eed;
+  let r = rng(seed0);
+  /** Dice for a spot in a run: the same spot in a repeat of it rolls the same, so it lays out the same. */
+  const dice = (run: ShapesRun, offset: number) => rng((seed0 ^ Math.imul(run.seed + 1, 0x9e3779b1) ^ Math.imul(offset + 1, 0x85ebca6b)) >>> 0);
   const w = hitWeights(a);
   const sections = shapesSections(a);
   const runs = shapesRuns(a, w, p, sections, r);
@@ -602,27 +740,23 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
   // ---- Spinners: beams around a drifting pivot, driven by the music, while a sound holds ----
   const pivots = new Map<ShapesRun, (t: number) => [number, number]>();
-  for (const s of runs) {
-    if (s.theme !== 'spinner' || s.end - s.start < SPINNER_MIN) continue;
-    const hit = s.start;
-    const end = s.end - 0.1;
+  /** A pivot and the path of a beam around it from `hit` to `end`. */
+  const spin = (hit: number, end: number, dice: () => number) => {
     // The pivot wanders on a slow Lissajous curve around the middle of the arena
-    const fx = 0.05 + r() * 0.06, fy = 0.05 + r() * 0.06, px = r() * 6.28, py = r() * 6.28;
+    const fx = 0.05 + dice() * 0.06, fy = 0.05 + dice() * 0.06, px = dice() * 6.28, py = dice() * 6.28;
     const pivot = (t: number): [number, number] => [
-      0.5 + 0.22 * Math.sin(2 * Math.PI * fx * (t - s.start) + px),
-      0.5 + 0.2 * Math.sin(2 * Math.PI * fy * (t - s.start) + py),
+      0.5 + 0.22 * Math.sin(2 * Math.PI * fx * (t - hit) + px),
+      0.5 + 0.2 * Math.sin(2 * Math.PI * fy * (t - hit) + py),
     ];
-    pivots.set(s, pivot);
-
     // Spin speed follows the loudness; hits kick it forward, the biggest ones reverse it
     const kicks: { t: number; s: number }[] = [];
     for (let i = 0; i < a.onsetTimes.length; i++) {
       const t = a.onsetTimes[i];
       if (t >= hit && t < end && w.prom[i] >= 0.65) kicks.push({ t, s: w.heft[i] });
     }
-    let dir = r() < 0.5 ? -1 : 1;
+    let dir = dice() < 0.5 ? -1 : 1;
     let lastFlip = hit;
-    let angle = r() * Math.PI;
+    let angle = dice() * Math.PI;
     let ki = 0;
     let kick = 0;
     const step = 0.05;
@@ -643,15 +777,55 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       path.y.push(y);
       path.a.push(angle);
     }
-    const beams = difficulty === 'normal' && r() < 0.5 ? 1 : p.beams;
+    return { pivot, path };
+  };
+  /** Beams on a path; `off` spaces several of them evenly around the pivot. */
+  const beamsOn = (path: BeamPath, h: number, e: number, count: number, width: number) => {
+    for (let k = 0; k < count; k++) {
+      const off = (k * Math.PI) / count;
+      push({ kind: 'beam', warn: h - Math.max(p.lead * 1.4, 0.8), hit: h, end: e, x: 0.5, y: 0.5, a0: 0, a1: 0, width, path: { ...path, a: path.a.map((v) => v + off) } });
+    }
+  };
+  for (const s of runs) {
+    if (s.theme !== 'spinner' || s.end - s.start < SPINNER_MIN) continue;
+    const hit = s.start;
+    const roll = dice(s, 0);
+    const { pivot, path } = spin(hit, s.end - 0.1, roll);
+    pivots.set(s, pivot);
+    const beams = difficulty === 'normal' && roll() < 0.5 ? 1 : p.beams;
     for (const [h, e] of beamHolds(a, s.start, s.end)) {
-      const i0 = Math.max(0, Math.round((h - hit) / step)), i1 = Math.min(path.a.length, Math.round((e - hit) / step) + 2);
+      const i0 = Math.max(0, Math.round((h - hit) / path.step)), i1 = Math.min(path.a.length, Math.round((e - hit) / path.step) + 2);
       if (i1 - i0 < 3) continue;
-      const slice = { step, x: path.x.slice(i0, i1), y: path.y.slice(i0, i1), a: path.a.slice(i0, i1) };
-      for (let k = 0; k < beams; k++) {
-        const off = (k * Math.PI) / beams;
-        push({ kind: 'beam', warn: h - Math.max(p.lead * 1.4, 0.8), hit: h, end: e, x: 0.5, y: 0.5, a0: 0, a1: 0, width: 4.5, path: { ...slice, a: slice.a.map((v) => v + off) } });
-      }
+      beamsOn({ step: path.step, x: path.x.slice(i0, i1), y: path.y.slice(i0, i1), a: path.a.slice(i0, i1) }, h, e, beams, 4.5);
+    }
+  }
+
+  // ---- Held notes: a beam for as long as the note lasts, whatever the run is playing ----
+  const held: { start: number; end: number; pivot: (t: number) => [number, number] }[] = [];
+  {
+    const phrases: { start: number; end: number; strength: number }[] = [];
+    for (let i = 0; i < a.noteStart.length; i++) {
+      const start = a.noteStart[i], end = a.noteEnd[i];
+      let lvl = 0, c = 0;
+      for (let t = start; t < end; t += 0.1) { lvl += sample(a.level, a.fps, t); c++; }
+      lvl /= Math.max(1, c);
+      if (lvl < NOTE_BEAM_LEVEL || a.noteStrength[i] * (0.5 + lvl) < NOTE_BEAM_STRENGTH) continue;
+      const last = phrases[phrases.length - 1];
+      if (last && start - last.end <= NOTE_JOIN) {
+        last.end = end;
+        last.strength = Math.max(last.strength, a.noteStrength[i]);
+      } else phrases.push({ start, end, strength: a.noteStrength[i] });
+    }
+    for (const q of phrases) {
+      if (q.end - q.start < NOTE_BEAM_MIN) continue;
+      // A build holds back for its drop, and a spinner already has beams of its own
+      if (sections[sectionIndexAt(sections, q.start)].role === 'build') continue;
+      if (runs.some((s) => s.theme === 'spinner' && s.start < q.end && s.end > q.start)) continue;
+      const run = runs[sectionIndexAt(runs, q.start)];
+      const h = snapToHit(a, q.start, 0.1);
+      const { pivot, path } = spin(h, q.end, dice(run, 1000 + Math.round((q.start - run.start) / beat)));
+      beamsOn(path, h, q.end, q.strength >= NOTE_CROSS && difficulty !== 'easy' ? 2 : 1, 3.5 + 3.5 * q.strength);
+      held.push({ start: h, end: q.end, pivot });
     }
   }
 
@@ -663,8 +837,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
   // ---- Ray bursts: short beams fanning out of the spinner's pivot on big hits ----
   let lastBurst = -Infinity;
-  const burst = (t: number, run: ShapesRun) => {
-    const pivot = pivots.get(run);
+  const burst = (t: number, pivot?: (t: number) => [number, number]) => {
     if (!pivot || t - lastBurst < (BURST_BEATS - inten) * beat || budget.left(t, scale) < cost('bar')) return false;
     lastBurst = t;
     const [x, y] = pivot(t);
@@ -866,6 +1039,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     const build = sec.role === 'build';
     const ri = sectionIndexAt(runs, t);
     const run = runs[ri];
+    // Dice from the hit's place in its run (16th notes): a repeat of the run lays out the same, and
+    // a hit only one of them has doesn't throw off the rest
+    r = dice(run, ri === runIndex ? 1 + Math.round((t - run.start) / (beat / 4)) : 0);
     if (ri !== runIndex) {
       // Fresh run: new lane orientation, starting side and trail
       runIndex = ri;
@@ -873,6 +1049,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       stepDir = r() < 0.5 ? 1 : -1;
       step = stepDir > 0 ? 0 : STEP_LANES - 1;
       stepsSinceTurn = 0;
+      alt = 0;
+      volleyCount = 0;
+      lastGap = 0.5;
       newTrail();
     }
     heft = w.heft[i];
@@ -894,7 +1073,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       }
       if (ahead && left < COST.bar * 2) continue;
     }
-    const idle = t - lastSpawn > p.idleMax * (1 + 1.5 * (1 - inten));
+    // Under a held note its beam is the main thing: the hits fire around it as they do in a spinner
+    const note = held.find((q) => t >= q.start - 0.1 && t < q.end);
+    const idle = !note && t - lastSpawn > p.idleMax * (1 + 1.5 * (1 - inten));
     const before = hazards.length;
 
     // A drop opens on its first beat with a cross of bars, bursting into shots where they meet
@@ -918,8 +1099,11 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       continue;
     }
 
+    // The beam landing is this hit's attack
+    if (note && Math.abs(t - note.start) <= 0.1) continue;
+
     // Every theme gives each voice its own attack; weak hits only ever get light ones
-    switch (run.theme) {
+    switch (note ? 'spinner' : run.theme) {
       case 'field':
         if (heavy && left >= cost('bar') && fullBar(t, alt++ % 2 ? 'h' : 'v', homing)) break;
         if (weak || voice === 'hat') { if (difficulty !== 'easy') trailBomb(t); }
@@ -1012,7 +1196,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
       case 'spinner':
         // The beams sweep the arena while the sound holds; the hits fire around them
-        if (heavy && burst(t, run)) break;
+        if (heavy && burst(t, note?.pivot ?? pivots.get(run))) break;
         if (mid && voice !== 'hat' && pop(t, big, Math.ceil(p.pops / 2))) break;
         if (voice === 'hat' && (difficulty === 'hard' || (difficulty === 'normal' && inten > 0.5))) trailBomb(t);
         break;

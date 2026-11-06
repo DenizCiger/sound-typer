@@ -13,6 +13,10 @@ self.onmessage = (e: MessageEvent<{ id: number; samples: Float32Array; sampleRat
     result.onsetBrightness.buffer,
     result.brightness.buffer,
     result.tonal.buffer,
+    result.noteStart.buffer,
+    result.noteEnd.buffer,
+    result.noteStrength.buffer,
+    result.print.buffer,
     result.beatTimes.buffer,
     result.beatInBar.buffer,
   ];

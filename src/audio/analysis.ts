@@ -31,6 +31,16 @@ export interface TrackAnalysis {
    * (drums), 0..1. Per frame.
    */
   tonal: Float32Array;
+  /** Held notes (a long trumpet note, a sung line, a lead): a stable pitch that doesn't decay. Sorted, never overlapping. */
+  noteStart: Float32Array;
+  noteEnd: Float32Array;
+  /** How much of the mid range's energy the note and its harmonics take, 0..1. */
+  noteStrength: Float32Array;
+  /**
+   * What the music sounds like, PRINT_FPS frames per second, PRINT_SIZE values each: pitch classes
+   * (PRINT_CHROMA of them, harmony and melody) then log band levels (timbre). For finding repeats.
+   */
+  print: Float32Array;
   /** Estimated tempo in beats per minute (one per track). */
   tempo: number;
   /** Beat times in seconds, following the tempo with small drift. */
@@ -40,6 +50,9 @@ export interface TrackAnalysis {
 }
 
 export const ANALYSIS_FPS = 100;
+export const PRINT_FPS = 10;
+export const PRINT_CHROMA = 12;
+export const PRINT_SIZE = PRINT_CHROMA + 8;
 
 const SILENCE_DB = -60;
 const MIN_RANGE_DB = 15;
@@ -337,6 +350,8 @@ export function analyzeTrack(samples: Float32Array, sampleRate: number): TrackAn
   const brightness = smooth(rawBright, 10);
 
   const tonal = tonalCurve(bandMag, frames, fbBands, dB);
+  const notes = heldNotes(bandMag, frames, fbCenterHz);
+  const print = soundPrint(bandMag, frames, fbCenterHz);
 
   // ---- Beats and bars ----
   const { period, beats } = trackBeats(noveltyOut, onsetTimes, fps);
@@ -356,6 +371,10 @@ export function analyzeTrack(samples: Float32Array, sampleRate: number): TrackAn
     onsetBrightness,
     brightness,
     tonal,
+    noteStart: Float32Array.from(notes, (q) => q.start / fps),
+    noteEnd: Float32Array.from(notes, (q) => q.end / fps),
+    noteStrength: Float32Array.from(notes, (q) => q.strength),
+    print,
     tempo: (60 * fps) / period,
     beatTimes: Float32Array.from(beats, (b) => b / fps),
     beatInBar,
@@ -413,6 +432,147 @@ function tonalCurve(bandMag: Float32Array, frames: number, bands: number, dB: Fl
   const lo = percentile(lit, 0.05), hi = percentile(lit, 0.95);
   const range = Math.max(TONAL_MIN_RANGE, hi - lo), mid = (lo + hi) / 2;
   for (let t = 0; t < frames; t++) out[t] = dB[t] > SILENCE_DB + 10 ? Math.min(1, Math.max(0, 0.5 + (out[t] - mid) / range)) : 0;
+  return out;
+}
+
+/** Range held notes are looked for in, Hz: above the bass, up to a lead's first harmonics. */
+const NOTE_HZ: [number, number] = [160, 4000];
+/** A note's band must stand this far above the bands around it (drums are flat, so they don't). */
+const NOTE_PEAK = 2.2;
+/** Frames between looks at the spectrum, and how many a note may vanish for (a snare over it). */
+const NOTE_STRIDE = 2;
+const NOTE_GAP = 15;
+/** Shortest note, frames. */
+const NOTE_MIN = 50;
+/** Its last third must hold this share of its first third's level: a piano's decay isn't held. */
+const NOTE_HOLD = 0.55;
+/** Tail below this share of its peak isn't the note anymore. */
+const NOTE_TAIL = 0.4;
+/** Looks either side that a note's level is averaged over. */
+const NOTE_SMOOTH = 6;
+
+interface NoteTrack { band: number; start: number; last: number; mags: number[]; share: number }
+
+/**
+ * Follows spectral peaks through time (partial tracking on the semitone bands). A peak that keeps
+ * its pitch (±1 band per look, so vibrato is fine) and its level for long enough is a held note;
+ * peaks that run together (harmonics, chords) count as one note, the strongest giving its span.
+ */
+function heldNotes(bandMag: Float32Array, frames: number, hz: number[]) {
+  const bands = hz.length;
+  const lo = Math.max(1, hz.findIndex((f) => f >= NOTE_HZ[0]));
+  let hi = hz.findIndex((f) => f > NOTE_HZ[1]);
+  if (hi < 0) hi = bands - 1;
+  const m = new Float64Array(bands);
+  let live: NoteTrack[] = [];
+  const done: { start: number; end: number; share: number }[] = [];
+  const close = (q: NoteTrack) => {
+    // A level falling away ends the note: the same pitch struck again is a new one, not a hold
+    let from = 0, peak = 0;
+    const segment = (to: number) => {
+      const len = to - from;
+      if (len * NOTE_STRIDE < NOTE_MIN) return;
+      const third = Math.floor(len / 3);
+      let first = 0, final = 0;
+      for (let i = 0; i < third; i++) { first += q.mags[from + i]; final += q.mags[to - 1 - i]; }
+      if (final < first * NOTE_HOLD) return;
+      done.push({ start: q.start + from * NOTE_STRIDE, end: q.start + to * NOTE_STRIDE, share: q.share / q.mags.length });
+    };
+    // (smoothed: a drum landing on the same band is a bump, not the note's level)
+    const n = q.mags.length;
+    for (let i = 0; i < n; i++) {
+      let s = 0, c = 0;
+      for (let u = Math.max(0, i - NOTE_SMOOTH); u <= Math.min(n - 1, i + NOTE_SMOOTH); u++) { s += q.mags[u]; c++; }
+      const v = s / c;
+      if (v < peak * NOTE_TAIL) { segment(i); from = i + 1; peak = 0; continue; }
+      peak = Math.max(peak, v);
+    }
+    segment(n);
+  };
+  for (let t = 0; t < frames; t += NOTE_STRIDE) {
+    let total = 0;
+    for (let j = 0; j < bands; j++) {
+      let s = 0, c = 0;
+      for (let u = Math.max(0, t - 2); u <= Math.min(frames - 1, t + 2); u++) { s += bandMag[u * bands + j]; c++; }
+      m[j] = s / c;
+      if (j >= lo && j <= hi) total += m[j] * m[j];
+    }
+    const claimed = new Set<NoteTrack>();
+    for (let j = lo; j <= hi; j++) {
+      if (m[j] <= m[j - 1] || m[j] < m[j + 1] || m[j] <= 0) continue;
+      let around = 0, c = 0;
+      for (let k = Math.max(0, j - 6); k <= Math.min(bands - 1, j + 6); k++) if (Math.abs(k - j) > 1) { around += m[k]; c++; }
+      if (m[j] < NOTE_PEAK * (around / Math.max(1, c))) continue;
+      let best: NoteTrack | null = null;
+      for (const q of live) if (!claimed.has(q) && Math.abs(q.band - j) <= 1 && (!best || Math.abs(q.band - j) < Math.abs(best.band - j))) best = q;
+      const q = best ?? { band: j, start: t, last: t, mags: [], share: 0 };
+      if (!best) live.push(q);
+      claimed.add(q);
+      // Bridge what it vanished for
+      for (let u = q.last + NOTE_STRIDE; u < t; u += NOTE_STRIDE) q.mags.push(m[j]);
+      q.band = j;
+      q.last = t;
+      q.mags.push(m[j]);
+      q.share += total > 0 ? (m[j] * m[j]) / total : 0;
+    }
+    live = live.filter((q) => {
+      if (t - q.last <= NOTE_GAP) return true;
+      close(q);
+      return false;
+    });
+  }
+  live.forEach(close);
+
+  done.sort((x, y) => y.share * (y.end - y.start) - x.share * (x.end - x.start));
+  const groups: { start: number; end: number; strength: number }[] = [];
+  for (const d of done) {
+    const g = groups.find((o) => Math.min(o.end, d.end) - Math.max(o.start, d.start) >= 0.5 * (d.end - d.start));
+    if (g) g.strength += d.share;
+    else groups.push({ start: d.start, end: d.end, strength: d.share });
+  }
+  // Louder notes keep their span; whatever overlaps them gets trimmed or dropped
+  groups.sort((x, y) => y.strength - x.strength);
+  const notes: typeof groups = [];
+  for (const g of groups) {
+    let { start, end } = g;
+    for (const o of notes) {
+      if (o.end <= start || o.start >= end) continue;
+      if (o.start <= start) start = o.end;
+      else end = o.start;
+    }
+    if (end - start >= NOTE_MIN) notes.push({ start, end, strength: Math.min(1, g.strength) });
+  }
+  return notes.sort((x, y) => x.start - y.start);
+}
+
+/** See `TrackAnalysis.print`. Pitch classes are normalized per frame, so harmony is compared regardless of loudness. */
+function soundPrint(bandMag: Float32Array, frames: number, hz: number[]) {
+  const bands = hz.length;
+  const stride = Math.round(ANALYSIS_FPS / PRINT_FPS);
+  const n = Math.ceil(frames / stride);
+  const out = new Float32Array(n * PRINT_SIZE);
+  const timbres = PRINT_SIZE - PRINT_CHROMA;
+  const octaves = Math.log2(hz[bands - 1] / hz[0]);
+  for (let p = 0; p < n; p++) {
+    const o = p * PRINT_SIZE;
+    const counts = new Float64Array(timbres);
+    for (let j = 0; j < bands; j++) {
+      let s = 0, c = 0;
+      for (let t = p * stride; t < Math.min(frames, (p + 1) * stride); t++) { s += bandMag[t * bands + j]; c++; }
+      const v = s / Math.max(1, c);
+      if (hz[j] >= NOTE_HZ[0] && hz[j] <= NOTE_HZ[1]) {
+        const pc = ((Math.round(12 * Math.log2(hz[j] / 440)) % 12) + 12) % 12;
+        out[o + pc] += v;
+      }
+      const b = Math.min(timbres - 1, Math.floor((Math.log2(hz[j] / hz[0]) / octaves) * timbres));
+      out[o + PRINT_CHROMA + b] += Math.log10(1 + 1000 * v);
+      counts[b]++;
+    }
+    let peak = 0;
+    for (let k = 0; k < PRINT_CHROMA; k++) peak = Math.max(peak, out[o + k]);
+    if (peak > 0) for (let k = 0; k < PRINT_CHROMA; k++) out[o + k] /= peak;
+    for (let b = 0; b < timbres; b++) out[o + PRINT_CHROMA + b] /= Math.max(1, counts[b]);
+  }
   return out;
 }
 
