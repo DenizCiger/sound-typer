@@ -8,7 +8,7 @@ import type { WaveSim, WaveStep } from './sim';
  * Flat look, in the app's zinc palette. The only color is the speed stage's, cool when slow and
  * hot when fast, on the wall edges, spikes and saws, so a speed change shows at a glance.
  */
-const STAGE_COLORS = ['96, 165, 250', '45, 212, 191', '163, 230, 53', '250, 204, 21', '251, 146, 60', '244, 63, 94'];
+export const STAGE_COLORS = ['96, 165, 250', '45, 212, 191', '163, 230, 53', '250, 204, 21', '251, 146, 60', '244, 63, 94'];
 /**
  * Zoom at the slowest and the fastest speed stage: in close while it crawls, out at speed so
  * there's more of the level ahead to read.

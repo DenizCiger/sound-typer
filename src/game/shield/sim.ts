@@ -22,6 +22,8 @@ export interface ShieldStep {
   died: boolean;
   checkpoint: boolean;
   rewound: boolean;
+  /** The run jumped (seek or rewind): the camera should snap. */
+  jumped: boolean;
 }
 
 export class ShieldSim {
@@ -136,7 +138,7 @@ export class ShieldSim {
   }
 
   step(pos: number, input: GameInput): ShieldStep {
-    const res: ShieldStep = { blocks: [], hit: null, holding: false, died: false, checkpoint: false, rewound: false };
+    const res: ShieldStep = { blocks: [], hit: null, holding: false, died: false, checkpoint: false, rewound: false, jumped: false };
     const jumped = this.lastPos >= 0 && (pos < this.lastPos || pos - this.lastPos > MAX_CATCHUP);
     if (this.lastPos < 0 || jumped) {
       if (this.expectRewind !== null && Math.abs(pos - this.expectRewind) < 0.5) {
@@ -150,6 +152,7 @@ export class ShieldSim {
         this.invuln = Math.max(this.invuln, 0.5);
       }
       this.seekTo(pos);
+      res.jumped = true;
       this.lastPos = pos;
       this.position = pos;
       return res;

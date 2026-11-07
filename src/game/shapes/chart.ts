@@ -324,7 +324,7 @@ const SLAM = 0.75;
 
 
 /** Splits the song into parts with roles and colours; the end of the part before a drop is its build. */
-function shapesSections(a: TrackAnalysis): ShapesSection[] {
+export function shapesSections(a: TrackAnalysis): ShapesSection[] {
   const parts = songParts(a);
   // Song-relative scale like Wave's speed stages, with a minimum range so a flat song stays flat
   const sorted = parts.map((q) => q.inten).sort((x, y) => x - y);
@@ -355,7 +355,7 @@ function shapesSections(a: TrackAnalysis): ShapesSection[] {
 }
 
 /** Moments the music stops dead and comes back on a hit: (start, return) pairs. */
-function findRests(a: TrackAnalysis): [number, number][] {
+export function findRests(a: TrackAnalysis): [number, number][] {
   const out: [number, number][] = [];
   const n = a.level.length, fps = a.fps;
   for (let f = Math.round(3 * fps); f < n - 3 * fps; f++) {
@@ -385,7 +385,7 @@ function lowerTime(times: Float32Array, t: number) {
 }
 
 /** Bar start times from the beat grid; stretches without one are cut every BAR_FALLBACK seconds. */
-function barStarts(a: TrackAnalysis): number[] {
+export function barStarts(a: TrackAnalysis): number[] {
   const downs: number[] = [];
   for (let k = 0; k < a.beatTimes.length; k++) if (a.beatInBar[k] === 0) downs.push(a.beatTimes[k]);
   const bars = [0];
@@ -559,7 +559,7 @@ function feelDistance(x: Feel, y: Feel) {
  * never crosses a section. The theme fits the run's character; a run that sounds like an earlier
  * one gets the same theme, so a repeating riff brings back the same attack.
  */
-function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Params, sections: ShapesSection[], r: () => number): ShapesRun[] {
+export function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Pick<Params, 'bigAt'>, sections: ShapesSection[], r: () => number): ShapesRun[] {
   const bars = barStarts(a);
   const feel = (start: number, end: number): Feel => {
     let n = 0, kick = 0, hat = 0, heavy = 0;
