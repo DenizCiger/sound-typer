@@ -43,6 +43,12 @@ Switch the toolbar toggle from **Type** to **Game** for a rhythm game generated 
 - Health and checkpoints work like in Shapes; after a hit you're put back on the path
 - Plain floors and ceilings are safe to slide along, spiked ones aren't
 
+**Shield** — you can't move, only turn a shield to face up, right, down or left. Spears fly in from the four sides and land exactly on the music's hits, so blocking them plays the song: within a couple of bars the kick, snare and hat can each have their own side, or the spears walk around you in spins and back-and-forths. Repeated passages come back with the same pattern. Big red spears are the heavy hits: they come in much faster and land with a blast. Amber ones fly in backwards, then jump to the opposite side just before they land (not on Easy), so block the side they point away from. Long teal lances on loud held notes have to be blocked for as long as the note lasts.
+
+- **Turn** — WASD, arrows or the mouse (on touch: press on the side to block)
+- **Space**, **Esc** or **P** — pause
+- Health and checkpoints work like in Shapes
+
 In every style, the score multiplier grows the longer you go without getting hit. At the end you get a grade and your best score for that song, style and difficulty. Seeking turns the run into a practice run that doesn't count.
 
 ## How it works
@@ -61,7 +67,7 @@ Because the whole track is known in advance, playback just looks up features at 
 - **Visualizer** — spectrum on top; below it a timeline of the typing intensity and detected hits (bright ones shake), including a look-ahead past the playhead
 - **Settings** (gear icon):
   - **Typing** — Speed (characters per second at full volume), Dynamics (higher = quiet parts slower, loud parts stand out), Punch (how hard hits slam text in), Hits complete words, Whitespace handling
-  - **Game** — Style (Bullet hell / Shapes / Wave), Difficulty (Easy / Normal / Hard: density, speed, warning time, timing window, health)
+  - **Game** — Style (Bullet hell / Shapes / Wave / Shield), Difficulty (Easy / Normal / Hard: density, speed, warning time, timing window, health)
   - **Effects** — Screen shake on/off, shake strength and threshold, glow on hits (0 = off, up to 3x)
   - **Layout** — Text anchor (bottom or center), text width (ignored on phones)
   - **Reset to defaults**

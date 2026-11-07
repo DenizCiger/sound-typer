@@ -404,7 +404,7 @@ function barStarts(a: TrackAnalysis): number[] {
  * earlier beat, looking for diagonals. Works on beats rather than bars, since downbeats are the
  * least reliable part of the grid. Returns where a time was first heard: -1 if it's new.
  */
-function songRepeats(a: TrackAnalysis): (t: number) => number {
+export function songRepeats(a: TrackAnalysis): (t: number) => number {
   const beats = a.beatTimes.length >= REPEAT_LAG ? a.beatTimes : Float32Array.from({ length: Math.floor(a.duration * 2) }, (_, k) => k / 2);
   const n = beats.length;
   const none = new Int32Array(n).fill(-1);

@@ -55,6 +55,7 @@ const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
   { value: 'bullets', label: 'Bullet hell' },
   { value: 'shapes', label: 'Shapes' },
   { value: 'wave', label: 'Wave' },
+  { value: 'shield', label: 'Shield' },
 ];
 
 const WHITESPACE_OPTIONS: { value: WhitespaceMode; label: string }[] = [
@@ -241,7 +242,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
         <div className={styles.row}>
           <div className={styles.labelGroup}>
             <span className={styles.label}>Style</span>
-            <span className={styles.hint}>Dodge bullet patterns, dash through shapes, or fly the wave</span>
+            <span className={styles.hint}>Dodge bullet patterns, dash through shapes, fly the wave, or block spears</span>
           </div>
           <div className={styles.segmented}>
             {STYLE_OPTIONS.map((option) => (
@@ -275,7 +276,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
 
         <SliderRow
           label="Respawn timer"
-          hint="Pause on the checkpoint after a rewind (Shapes, Wave)"
+          hint="Pause on the checkpoint after a rewind (Shapes, Wave, Shield)"
           min={0}
           max={5}
           step={0.5}

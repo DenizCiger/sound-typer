@@ -6,6 +6,7 @@ import type { EffectSettings, GameEngine, GameInput, GameStyle } from '../game/t
 import { BulletGame } from '../game/bullets';
 import { ShapesGame } from '../game/shapes';
 import { WaveGame } from '../game/wave';
+import { ShieldGame } from '../game/shield';
 import styles from '../styles/Game.module.css';
 
 export interface GameHandle {
@@ -47,13 +48,18 @@ interface Results {
 
 // Only used for hit detection, the typing speed doesn't matter here
 const HIT_PARAMS: DriverParams = { maxCps: 0, dynamics: 1, punch: 0 };
-const NO_INPUT: GameInput = { dx: 0, dy: 0, focus: false, target: null, dash: false, hold: false };
+const NO_INPUT: GameInput = { dx: 0, dy: 0, focus: false, target: null, dash: false, hold: false, facing: null };
 const TAP_MS = 200;
 const MOUSE_TAKEOVER_PX = 12;
 
 const KEYS: Record<string, [number, number]> = {
   ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
   KeyW: [0, -1], KeyS: [0, 1], KeyA: [-1, 0], KeyD: [1, 0],
+};
+/** Shield: the side each direction key turns to. */
+const KEY_SIDES: Record<string, number> = {
+  ArrowUp: 0, ArrowRight: 1, ArrowDown: 2, ArrowLeft: 3,
+  KeyW: 0, KeyD: 1, KeyS: 2, KeyA: 3,
 };
 const DASH_KEYS = new Set(['Space', 'KeyX', 'KeyK', 'KeyJ', 'ShiftLeft', 'ShiftRight']);
 const HOLD_KEYS = new Set([...DASH_KEYS, 'ArrowUp', 'KeyW']);
@@ -62,11 +68,13 @@ const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
   { value: 'bullets', label: 'Bullet hell' },
   { value: 'shapes', label: 'Shapes' },
   { value: 'wave', label: 'Wave' },
+  { value: 'shield', label: 'Shield' },
 ];
 
 function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Difficulty): GameEngine {
   if (style === 'shapes') return new ShapesGame(analysis, difficulty);
   if (style === 'wave') return new WaveGame(analysis, difficulty);
+  if (style === 'shield') return new ShieldGame(analysis, difficulty);
   return new BulletGame(analysis, difficulty);
 }
 
@@ -80,6 +88,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   const progressRef = useRef<HTMLDivElement>(null);
   const keysRef = useRef(new Set<string>());
   const dashRef = useRef(false);
+  const facingRef = useRef<number | null>(null);
   const pointerRef = useRef<{
     target: [number, number] | null;
     offset: [number, number] | null;
@@ -217,6 +226,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         if (!e.repeat) p.onTogglePlay();
         return;
       }
+      if (p.style === 'shield' && e.code in KEY_SIDES && !e.repeat) facingRef.current = KEY_SIDES[e.code];
       if (KEYS[e.code] || e.key === 'Shift') {
         keysRef.current.add(e.code);
         if (KEYS[e.code]) {
@@ -256,9 +266,11 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     const focus = style === 'bullets' && (keys.has('ShiftLeft') || keys.has('ShiftRight') || p.pressed);
     const dash = dashRef.current;
     dashRef.current = false;
+    const facing = facingRef.current;
+    facingRef.current = null;
     let hold = p.pressed || p.touches > 0;
     for (const code of keys) if (HOLD_KEYS.has(code)) hold = true;
-    return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: p.target, dash, hold };
+    return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: p.target, dash, hold, facing };
   };
 
   // Respawn countdown: the song is paused on the checkpoint; the player can already move
@@ -369,6 +381,12 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     }
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     p.touches++;
+    // The shield turns to wherever a finger is, not relative to where it went down
+    if (propsRef.current.style === 'shield') {
+      if (w) p.target = w;
+      if (e.isPrimary) p.offset = [0, 0];
+      return;
+    }
     // A second finger dashes
     if (!e.isPrimary) {
       if (shapes) dashRef.current = true;
@@ -476,7 +494,14 @@ export const Game = forwardRef<GameHandle, GameProps>(({
                 <button className={styles.primaryBtn} onClick={onTogglePlay}>
                   {message === 'Paused' ? 'Resume' : 'Start'}
                 </button>
-                {wave ? (
+                {style === 'shield' ? (
+                  <div className={styles.help}>
+                    <span><kbd>WASD</kbd> / <kbd>Arrows</kbd> / <kbd>Mouse</kbd> turn the shield</span>
+                    <span>Touch: press on the side to block</span>
+                    <span><kbd>Space</kbd> / <kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
+                    <span>You can't move. Spears land on the beat: face them when they arrive. Amber ones fly in backwards, then jump to the opposite side: block where they point. Big red ones hit hard, long ones last as long as the note. Run out of health and the song rewinds to the last checkpoint.</span>
+                  </div>
+                ) : wave ? (
                   <div className={styles.help}>
                     <span>Hold <kbd>Space</kbd> / <kbd>W</kbd> / <kbd>Up</kbd> / click to fly up, let go to fly down</span>
                     <span>Touch: hold anywhere</span>
