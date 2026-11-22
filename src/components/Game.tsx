@@ -8,6 +8,7 @@ import { ShapesGame } from '../game/shapes';
 import { WaveGame } from '../game/wave';
 import { ShieldGame } from '../game/shield';
 import styles from '../styles/Game.module.css';
+import { IconUpload } from './Controls';
 
 export interface GameHandle {
   /** Advances the game to the audible position and draws it. */
@@ -37,6 +38,8 @@ interface GameProps {
   onStyleChange: (style: GameStyle) => void;
   onTogglePlay: () => void;
   onRestart: () => void;
+  /** Loads an audio file (shown as a picker while no song is loaded). */
+  onLoadFile: (file: File) => void;
   /** Rewinds the song (checkpoints). */
   onSeek: (seconds: number) => void;
 }
@@ -80,7 +83,7 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 
 export const Game = forwardRef<GameHandle, GameProps>(({
   analysis, status, isPlaying, style, difficulty, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors,
-  onStyleChange, onTogglePlay, onRestart, onSeek,
+  onStyleChange, onTogglePlay, onRestart, onSeek, onLoadFile,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
@@ -102,6 +105,8 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   }>({ target: null, offset: null, pressed: false, touches: 0, downAt: 0, client: null, keyboardAt: null });
   const finishedRef = useRef(false);
   const [results, setResults] = useState<Results | null>(null);
+  const [fileDragging, setFileDragging] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   /** performance.now() when the respawn countdown ends and the song resumes; null when not respawning. */
   const [respawnUntil, setRespawnUntil] = useState<number | null>(null);
   const countdownRef = useRef<HTMLDivElement>(null);
@@ -472,9 +477,54 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       )}
 
       {message && (
-        <div className={styles.overlay}>
-          <div className={styles.card}>
-            <div className={styles.title}>{message}</div>
+        <div
+          className={styles.overlay}
+          onDragOver={!analysis ? (e) => { e.preventDefault(); setFileDragging(true); } : undefined}
+          onDragLeave={!analysis ? () => setFileDragging(false) : undefined}
+          onDrop={!analysis ? (e) => {
+            e.preventDefault();
+            setFileDragging(false);
+            const f = Array.from(e.dataTransfer.files).find((file) => file.type.startsWith('audio/'));
+            if (f) onLoadFile(f);
+          } : undefined}
+        >
+          <div
+            className={`${styles.card} ${!analysis ? styles.pickerCard : ''} ${fileDragging ? styles.cardDragging : ''}`}
+            onClick={!analysis ? () => fileInputRef.current?.click() : undefined}
+            onKeyDown={!analysis ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                fileInputRef.current?.click();
+              }
+            } : undefined}
+            role={!analysis ? 'button' : undefined}
+            tabIndex={!analysis ? 0 : undefined}
+            aria-label={!analysis ? 'Load a song' : undefined}
+          >
+            <div className={styles.title}>
+              <span>{message}</span>
+              {!analysis && <IconUpload />}
+            </div>
+            {!analysis && (
+              <>
+                <div className={styles.help}>
+                  <span>or drop an audio file anywhere here</span>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="audio/*"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) {
+                      onLoadFile(f);
+                      e.target.value = '';
+                    }
+                  }}
+                />
+              </>
+            )}
             {analysis && (
               <>
                 {message === 'Ready' && (

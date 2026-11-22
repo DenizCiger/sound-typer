@@ -15,7 +15,7 @@ const IconPause = () => (
   </svg>
 );
 
-const IconMusic = () => (
+export const IconMusic = () => (
   <svg
     width="12"
     height="12"
@@ -32,7 +32,7 @@ const IconMusic = () => (
   </svg>
 );
 
-const IconUpload = () => (
+export const IconUpload = () => (
   <svg
     width="12"
     height="12"

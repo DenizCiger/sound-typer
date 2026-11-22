@@ -292,6 +292,7 @@ export default function App() {
           onTogglePlay={handleTogglePlay}
           onRestart={handleRestart}
           onSeek={handleSeek}
+          onLoadFile={handleFile}
         />
       ) : (
       <Typewriter
