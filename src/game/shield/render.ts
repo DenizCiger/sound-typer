@@ -117,7 +117,7 @@ export class ShieldRenderer {
   /** Each lane's flash: a spear leaving its tip, a block on it. */
   private tips = [0, 0, 0, 0];
   private lanes = [0, 0, 0, 0];
-  /** Index of the next spear to be launched. */
+  /** Index into the chart's launches of the next spear to come into view. */
   private launch = 0;
   /** Camera lurch from blocks, screen pixels. */
   private lurchX = 0;
@@ -206,11 +206,12 @@ export class ShieldRenderer {
     }
 
     // Spears leave the border's tips with a pop
+    const launched = () => this.launch < c.launches.length && c.spears[c.launches[this.launch]].spawn <= t;
     if (res.jumped) {
       this.launch = 0;
-      while (this.launch < c.spears.length && c.spears[this.launch].spawn <= t) this.launch++;
+      while (launched()) this.launch++;
     }
-    for (; this.launch < c.spears.length && c.spears[this.launch].spawn <= t; this.launch++) this.tips[c.spears[this.launch].from] = 1;
+    for (; launched(); this.launch++) this.tips[c.spears[c.launches[this.launch]].from] = 1;
 
     const resting = restAt(c.rests, t);
     // Back from a rest: everything comes on at once
@@ -331,12 +332,13 @@ export class ShieldRenderer {
       ctx.fillRect(Math.round(Math.cos(a) * d), Math.round(Math.sin(a) * d), 1, 1);
     }
 
-    // Spawn times are sorted, so what's in view is a run from the first unresolved spear
-    let last = sim.cursor;
-    while (last < spears.length && spears[last].spawn <= t) last++;
+    // What's in view lands within the longest lead of now (a heavy flies faster, so it may come
+    // into view after a spear that lands before it)
+    const inView: Spear[] = [];
+    for (let i = sim.cursor; i < spears.length && spears[i].arrive <= t + sim.chart.maxLead; i++) if (spears[i].spawn <= t) inView.push(spears[i]);
 
     const heavyLane = [false, false, false, false];
-    for (let i = sim.cursor; i < last; i++) if (spears[i].heavy) heavyLane[spears[i].side] = true;
+    for (const s of inView) if (s.heavy) heavyLane[s.side] = true;
     // The lanes crawl inward a step at a time: a whole dash per beat
     const crawl = this.resting ? 0 : 3 - this.beatStep(sim);
     for (let side = 0; side < 4; side++) {
@@ -367,8 +369,7 @@ export class ShieldRenderer {
       fill('0, 0, 0', 0.55, 0, 0, w, h);
     }
 
-    for (let i = sim.cursor; i < last; i++) {
-      const s = spears[i];
+    for (const s of inView) {
       const color = colorOf(s);
       const q = quarterOf(sideAngle(s.side));
       if (s.kind === 'lance') {
