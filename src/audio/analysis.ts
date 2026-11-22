@@ -354,7 +354,7 @@ export function analyzeTrack(samples: Float32Array, sampleRate: number): TrackAn
   const print = soundPrint(bandMag, frames, fbCenterHz);
 
   // ---- Beats and bars ----
-  const { period, beats } = trackBeats(noveltyOut, onsetTimes, fps);
+  const { period, beats } = trackBeats(noveltyOut, onsetTimes, onsetStrength, fps);
   const lowNorm = new Float32Array(frames);
   for (let t = 0; t < frames; t++) lowNorm[t] = flux[0][t] / scales[0];
   const beatInBar = barPhases(beats, lowNorm, noveltyOut, bandMag, fbBands);
@@ -584,14 +584,32 @@ const BPM_PRIOR = 120;
 const BPM_SPREAD = 1;
 /** How strictly beats keep to the tempo (dynamic programming beat tracking). */
 const BEAT_TIGHTNESS = 100;
+/**
+ * A fast song whose beats come in accented pairs (a four-on-the-floor kick with every other one
+ * harder, a snare on every other beat) reads at half its tempo. It's doubled when the doubled
+ * tempo stays at most DOUBLE_MAX (fast electronic music goes past 200), the hits come at least
+ * DOUBLE_HITS per beat (its eighths read as sixteenths), and the half-beat's hit rivals the beat's
+ * (at least DOUBLE_RIVAL of its strength) in at least DOUBLE_SHARE of the beats that have a strong
+ * hit (DOUBLE_STRONG of the hits are weaker) on or between them. A slow song with busy figures has
+ * the hits too, but its half-beats are weak; a moderate song has the strong half-beats, but not
+ * the hits.
+ */
+const DOUBLE_MAX = 250;
+const DOUBLE_HITS = 3.4;
+const DOUBLE_RIVAL = 0.6;
+const DOUBLE_SHARE = 0.4;
+const DOUBLE_STRONG = 0.5;
+/** How close a hit has to be to a beat (or half-beat) to be on it, seconds. */
+const DOUBLE_NEAR = 0.035;
 
 /**
  * Global tempo from the onset curve's autocorrelation (with a prior toward ~120 BPM, and the
  * double period's correlation counted in so a strong half-time doesn't lose to a weak
  * subdivision), then beats by dynamic programming (Ellis 2007): each beat is placed where the
- * onsets are strong and about a period after the one before. Returns beat frames.
+ * onsets are strong and about a period after the one before. A tempo that turns out to be half
+ * the song's (`halfSpeed`) is doubled and the beats tracked again. Returns beat frames.
  */
-function trackBeats(onset: Float32Array, onsetTimes: Float32Array, fps: number): { period: number; beats: number[] } {
+function trackBeats(onset: Float32Array, onsetTimes: Float32Array, onsetStrength: Float32Array, fps: number): { period: number; beats: number[] } {
   const n = onset.length;
   const minLag = Math.floor((60 * fps) / BPM_MAX), maxLag = Math.ceil((60 * fps) / BPM_MIN);
   if (n < maxLag * 4 || onsetTimes.length < 8) return { period: (60 * fps) / BPM_PRIOR, beats: [] };
@@ -608,8 +626,24 @@ function trackBeats(onset: Float32Array, onsetTimes: Float32Array, fps: number):
   // Parabolic interpolation for a fractional period
   const y0 = score(best - 1), y1 = score(best), y2 = score(best + 1);
   const den = y0 - 2 * y1 + y2;
-  const period = best + (den < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / den)) : 0);
+  let period = best + (den < 0 ? Math.max(-0.5, Math.min(0.5, (0.5 * (y0 - y2)) / den)) : 0);
 
+  // Only where there's music: from half a beat before the first hit to half a beat after the last
+  const inMusic = (beats: number[]) => {
+    const first = onsetTimes[0] * fps - period / 2, last = onsetTimes[onsetTimes.length - 1] * fps + period / 2;
+    return beats.filter((b) => b >= first && b <= last);
+  };
+  let beats = inMusic(beatPath(onset, period));
+  if (halfSpeed(beats, period, onsetTimes, onsetStrength, fps)) {
+    period /= 2;
+    beats = inMusic(beatPath(onset, period));
+  }
+  return { period, beats };
+}
+
+/** Beats at a period by dynamic programming: frames where the onsets are strong, about a period apart. */
+function beatPath(onset: Float32Array, period: number): number[] {
+  const n = onset.length;
   // Local score: the onset curve, normalized and lightly smoothed
   let mean = 0, sq = 0;
   for (let t = 0; t < n; t++) { mean += onset[t]; sq += onset[t] * onset[t]; }
@@ -644,9 +678,29 @@ function trackBeats(onset: Float32Array, onsetTimes: Float32Array, fps: number):
   for (let t = Math.max(0, n - Math.round(period)); t < n; t++) if (total[t] > total[end]) end = t;
   const beats: number[] = [];
   for (let t = end; t >= 0; t = from[t]) beats.unshift(t);
-  // Only where there's music: from half a beat before the first hit to half a beat after the last
-  const first = onsetTimes[0] * fps - period / 2, last = onsetTimes[onsetTimes.length - 1] * fps + period / 2;
-  return { period, beats: beats.filter((b) => b >= first && b <= last) };
+  return beats;
+}
+
+/** Whether beats tracked at a period are every other beat of the song (see DOUBLE_MAX). */
+function halfSpeed(beats: number[], period: number, onsetTimes: Float32Array, onsetStrength: Float32Array, fps: number) {
+  if ((2 * 60 * fps) / period > DOUBLE_MAX || beats.length < 16 || onsetTimes.length / beats.length < DOUBLE_HITS) return false;
+  const strong = percentile(onsetStrength, DOUBLE_STRONG);
+  /** The strongest hit within DOUBLE_NEAR of a frame position, 0 if none. */
+  const hitAt = (frame: number) => {
+    const t = frame / fps;
+    let lo = 0, hi = onsetTimes.length, best = 0;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (onsetTimes[m] < t - DOUBLE_NEAR) lo = m + 1; else hi = m; }
+    for (let i = lo; i < onsetTimes.length && onsetTimes[i] <= t + DOUBLE_NEAR; i++) best = Math.max(best, onsetStrength[i]);
+    return best;
+  };
+  let counted = 0, rivals = 0;
+  for (let k = 0; k + 1 < beats.length; k++) {
+    const on = hitAt(beats[k]), off = hitAt((beats[k] + beats[k + 1]) / 2);
+    if (on < strong && off < strong) continue;
+    counted++;
+    if (off >= DOUBLE_RIVAL * on) rivals++;
+  }
+  return counted > 0 && rivals >= DOUBLE_SHARE * counted;
 }
 
 /**
