@@ -1,7 +1,7 @@
 import type { Hit } from '../../audio/driver';
 import { prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
-import { geometry, lastKick, playArea, type Geo, type Hazard } from './chart';
+import { geometry, lastKick, lastPulse, playArea, type Geo, type Hazard } from './chart';
 import { PLAYER_SIZE, type ShapesSim, type ShapesStep } from './sim';
 
 const BG = '#0b0a10';
@@ -225,10 +225,11 @@ export class ShapesRenderer {
       return;
     }
     // Solid: white flash right on the beat, then hot pink
-    // Lurching walls flash again on every jolt
+    // Lurching walls flash again on every jolt; what lingers lights up on the music's hits
     const age = pos - lastKick(hz, pos);
+    const throb = pos - (lastPulse(hz, pos) ?? -Infinity);
     const beat = 1 + 0.06 * this.pulse;
-    ctx.fillStyle = age < 0.06 ? '#fff' : `rgb(${this.col})`;
+    ctx.fillStyle = age < 0.06 ? '#fff' : throb < 0.08 ? `rgb(${this.rgb.map((c) => Math.round(c + (255 - c) * 0.55)).join(', ')})` : `rgb(${this.col})`;
     if (fx.glowIntensity > 0) {
       ctx.shadowColor = `rgba(${this.col}, 0.8)`;
       ctx.shadowBlur = 14 * fx.glowIntensity * (0.4 + 0.6 * this.intensity + 0.5 * this.pulse);

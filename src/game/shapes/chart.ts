@@ -48,6 +48,8 @@ interface Timing {
    * second time, and `end` is that much later.
    */
   freeze?: [number, number];
+  /** Song times while it's solid that it throbs on: the music's hits, so what's on screen moves with them. */
+  pulses?: number[];
 }
 
 export type Hazard = Timing & (
@@ -321,6 +323,33 @@ const MAX_SPAN_SHARE = 0.4;
 const HEAVY = 0.45;
 /** Heft from which bars slam a cross and pop-ups burst into a ring of shots. */
 const SLAM = 0.75;
+/**
+ * Drive (`raveCurve`): how hard the music is raving, 0..1. Intensity from RAVE_INTEN[0] (none) to
+ * RAVE_INTEN[1] (full), times how packed the hits are (RAVE_RATE hits a second is full), a bit less
+ * in a part that's quiet for this song. Raving music gets more of
+ * everything: wider bars and bigger pop-ups (RAVE_SIZE), lasting up to RAVE_LIFE seconds longer,
+ * more budget (RAVE_BUDGET), lesser hits spawning too (RAVE_PROM off the threshold), and a play area
+ * that lets attacks cover more of it (RAVE_COVER on top of COVER) and doesn't zoom out for every
+ * peak (it follows the attacks' average over the look-ahead rather than their peak), and a steps
+ * march mirrored from the other side (from RAVE_MIRROR).
+ */
+const RAVE_INTEN: [number, number] = [0.3, 0.7];
+const RAVE_RATE = 8;
+const RAVE_SIZE = 0.6;
+const RAVE_LIFE = 0.7;
+const RAVE_BUDGET = 0.7;
+const RAVE_PROM = 0.4;
+const RAVE_COVER = 0.15;
+/** Bars of one axis may cover this many more world units at full drive. */
+const RAVE_BAR_COVER = 15;
+const RAVE_MIRROR = 0.5;
+/** ...and a single hazard may span this much more of the play area's short side. */
+const RAVE_SPAN = 0.1;
+/** Pulses: hits at least PULSE_PROM, PULSE_GAP apart, grow a hazard by PULSE_POP for PULSE_TIME. */
+const PULSE_PROM = 0.3;
+const PULSE_GAP = 0.1;
+const PULSE_POP = 0.12;
+const PULSE_TIME = 0.1;
 
 
 /** Splits the song into parts with roles and colours; the end of the part before a drop is its build. */
@@ -687,6 +716,32 @@ export function shapesRuns(a: TrackAnalysis, w: HitWeights, p: Pick<Params, 'big
   return runs;
 }
 
+/**
+ * How hard the music is raving at each moment, 0..1, ZOOM_RATE samples a second: loud and packed
+ * with hits. Smoothed over about a second, so it describes the passage rather than the hit.
+ */
+export function raveCurve(a: TrackAnalysis, sections: ShapesSection[]): Float32Array {
+  const n = Math.ceil(a.duration * ZOOM_RATE) + 2;
+  const inten = new Float64Array(n + 1), hits = new Float64Array(n + 1);
+  for (let i = 0; i < n; i++) inten[i + 1] = inten[i] + intensityAt(a, i / ZOOM_RATE);
+  const count = new Float64Array(n);
+  for (let h = 0; h < a.onsetTimes.length; h++) count[Math.min(n - 1, Math.round(a.onsetTimes[h] * ZOOM_RATE))]++;
+  for (let i = 0; i < n; i++) hits[i + 1] = hits[i] + count[i];
+  const out = new Float32Array(n);
+  const ramp = (v: number, lo: number, hi: number) => Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
+  for (let i = 0; i < n; i++) {
+    const i0 = Math.max(0, i - ZOOM_RATE / 2), i1 = Math.min(n, i + ZOOM_RATE / 2 + 1);
+    const j0 = Math.max(0, i - ZOOM_RATE), j1 = Math.min(n, i + ZOOM_RATE + 1);
+    const loud = ramp((inten[i1] - inten[i0]) / (i1 - i0), RAVE_INTEN[0], RAVE_INTEN[1]);
+    const rate = ((hits[j1] - hits[j0]) / (j1 - j0)) * ZOOM_RATE;
+    const sec = sections[sectionIndexAt(sections, i / ZOOM_RATE)];
+    // A build holds back for its drop
+    const role = sec.role === 'build' ? 0.3 : sec.role === 'calm' || sec.role === 'break' ? 0.6 : 1;
+    out[i] = loud * (0.3 + 0.7 * Math.min(1, rate / RAVE_RATE)) * (0.7 + 0.3 * sec.level) * role;
+  }
+  return out;
+}
+
 export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): ShapesChart {
   const p = PARAMS[difficulty];
   const seed0 = seedFor(a) ^ 0x5eed;
@@ -696,6 +751,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   const w = hitWeights(a);
   const sections = shapesSections(a);
   const runs = shapesRuns(a, w, p, sections, r);
+  const rave = raveCurve(a, sections);
+  const raveAt = (t: number) => rave[Math.min(rave.length - 1, Math.max(0, Math.round(t * ZOOM_RATE)))];
   // The heaviest hit of each bar: walls only come on those, so there's at most one per bar
   const barTimes = barStarts(a);
   const barTop = new Set<number>();
@@ -703,6 +760,16 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     let top = -1;
     for (; i < a.onsetTimes.length && a.onsetTimes[i] < barTimes[b + 1]; i++) if (top < 0 || w.heft[i] > w.heft[top]) top = i;
     if (top >= 0) barTop.add(top);
+  }
+  // ...and of each half bar (two beats), for when raving music brings walls twice as often
+  const halfTop = new Set<number>();
+  for (let b = 0, i = 0; b + 1 < barTimes.length; b++) {
+    const mid = (barTimes[b] + barTimes[b + 1]) / 2;
+    for (const until of [mid, barTimes[b + 1]]) {
+      let top = -1;
+      for (; i < a.onsetTimes.length && a.onsetTimes[i] < until; i++) if (top < 0 || w.heft[i] > w.heft[top]) top = i;
+      if (top >= 0) halfTop.add(top);
+    }
   }
   /** Whether t is on a beat whose position in the bar passes `at` (0 is the downbeat). */
   const onBeat = (t: number, at: (pos: number) => boolean) => {
@@ -843,6 +910,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   // out, loud ones get the full load) and speeds up anything that flies
   let inten = 0;
   let scale = 1;
+  // How hard the music raves at the hit being placed: bigger, longer-lasting, more of everything
+  let drive = 0;
   const pace = () => 0.8 + 0.5 * inten;
 
   // ---- Ray bursts: short beams fanning out of the spinner's pivot on big hits ----
@@ -862,12 +931,12 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
 
   // ---- Rings: a slam bursts into shots flying out from where it landed ----
   const ring = (t: number, x: number, y: number, force = false) => {
-    const n = 6 + Math.round(4 * heft) + (difficulty === 'hard' ? 2 : 0);
+    const n = 6 + Math.round(4 * heft + 4 * drive) + (difficulty === 'hard' ? 2 : 0);
     if (difficulty === 'easy' || (!force && budget.left(t, scale) < cost('shot') * n)) return;
     const speed = (24 + 22 * heft) * p.speed * pace();
     const base = r() * Math.PI * 2;
     for (let k = 0; k < n; k++) {
-      push({ kind: 'shot', warn: t, hit: t, end: t + 200 / speed, x, y, angle: base + (k * 2 * Math.PI) / n, speed, r: 1.3 + 1.2 * heft });
+      push({ kind: 'shot', warn: t, hit: t, end: t + 200 / speed, x, y, angle: base + (k * 2 * Math.PI) / n, speed, r: (1.3 + 1.2 * heft) * (1 + RAVE_SIZE * drive) });
     }
   };
 
@@ -875,7 +944,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   const pops: { x: number; y: number; end: number }[] = [];
   const pop = (t: number, big: boolean, max = p.pops) => {
     const alive = pops.filter((l) => l.end > t);
-    if (alive.length >= max || budget.left(t, scale) < cost('bomb')) return false;
+    if (alive.length >= max + Math.round(3 * drive) || budget.left(t, scale) < cost('bomb')) return false;
     // Best of a few candidate spots: the one furthest from the others, so they don't pile up
     let bx = 0.5, by = 0.5, best = -1;
     for (let k = 0; k < 4; k++) {
@@ -883,8 +952,8 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       const d = alive.reduce((m, l) => Math.min(m, Math.hypot(l.x - x, l.y - y)), 2);
       if (d > best) { best = d; bx = x; by = y; }
     }
-    const end = t + 0.3 + 0.35 * heft;
-    const size = Math.min(MAX_POP_RADIUS, (3.5 + 10 * heft) * (big ? 1.15 : 1));
+    const end = t + 0.3 + 0.35 * heft + RAVE_LIFE * drive;
+    const size = Math.min(MAX_POP_RADIUS * (1 + 0.4 * drive), (3.5 + 10 * heft) * (big ? 1.15 : 1) * (1 + 0.4 * drive));
     if (r() < 0.6) {
       push({ kind: 'bomb', warn: warnFor(t, size), hit: t, end, x: bx, y: by, r: size });
     } else {
@@ -932,7 +1001,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   let volleyCount = 0;
   const volley = (t: number) => {
     // Light hits fire a shot or two, heavy ones a full row
-    const n = 1 + Math.round(3 * heft);
+    const n = 1 + Math.round(3 * heft + 2 * drive);
     if (budget.left(t, scale) < cost('shot') * n) return;
     // Same edge for a few volleys so they read as a pattern, then rotate
     if (volleyCount++ % 4 === 0) volleyEdge = Math.floor(r() * 4);
@@ -941,7 +1010,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     for (let k = 0; k < n; k++) {
       const u = (k + offset) / n;
       const [x, y, angle] = volleyEdge === 0 ? [u, -0.02, Math.PI / 2] : volleyEdge === 1 ? [1.02, u, Math.PI] : volleyEdge === 2 ? [u, 1.02, -Math.PI / 2] : [-0.02, u, 0];
-      push({ kind: 'shot', warn: t - p.lead * 0.7, hit: t, end: t + 260 / speed, x, y, angle, speed, r: 1.3 + 1.4 * heft });
+      push({ kind: 'shot', warn: t - p.lead * 0.7, hit: t, end: t + 260 / speed, x, y, angle, speed, r: (1.3 + 1.4 * heft) * (1 + RAVE_SIZE * drive) });
     }
   };
 
@@ -991,12 +1060,12 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
   // ---- Full bars: never pile up so much of the arena that there's nowhere left to stand ----
   const bars: { axis: 'h' | 'v'; at: number | null; width: number; warn: number; end: number }[] = [];
   const fullBar = (t: number, axis: 'h' | 'v', target: boolean, extra = 1) => {
-    const width = 3 + 10 * heft;
-    const warn = warnFor(t, width / 2, extra), end = t + 0.35 + 0.2 * heft;
+    const width = (3 + 10 * heft) * (1 + RAVE_SIZE * drive);
+    const warn = warnFor(t, width / 2, extra), end = t + 0.35 + 0.2 * heft + RAVE_LIFE * drive;
     // Dense hits would otherwise fill half the screen within a second: count every bar on the
     // same axis that's warning or solid at any point while this one is
     const live = bars.filter((b) => b.axis === axis && b.end > warn && b.warn < end);
-    if (live.reduce((sum, b) => sum + b.width, width) > BAR_COVER) return false;
+    if (live.reduce((sum, b) => sum + b.width, width) > BAR_COVER + RAVE_BAR_COVER * drive) return false;
     // Best of a few spots: the one furthest from the other bars, leaving lanes between them
     let at = spot(), best = -1;
     for (let k = 0; k < 4; k++) {
@@ -1044,8 +1113,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     }
     // Nothing new while the music holds its breath
     if (rest && t > rest[0] && t < rest[1]) continue;
-    // Near silence, only the hits that stand out
-    if (t < 1.5 || prom < (inten < 0.1 ? 0.45 : p.shotMin)) continue;
+    drive = raveAt(t);
+    // Near silence, only the hits that stand out; raving music takes lesser ones too
+    if (t < 1.5 || prom < (inten < 0.1 ? 0.45 : p.shotMin * (1 - RAVE_PROM * drive))) continue;
     const build = sec.role === 'build';
     const ri = sectionIndexAt(runs, t);
     const run = runs[ri];
@@ -1073,7 +1143,7 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     const mid = prom >= 0.45;
     const weak = !mid;
     const voice = voiceOf(i);
-    scale = (0.3 + 0.9 * inten) * (build ? BUILD_BUDGET : 1);
+    scale = (0.3 + 0.9 * inten) * (1 + RAVE_BUDGET * drive) * (build ? BUILD_BUDGET : 1);
     const left = budget.left(t, scale);
     // In a dense stream, a lesser hit leaves room for a clearly bigger one right behind it
     if (!big) {
@@ -1127,9 +1197,10 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
         {
           const axis = alt++ % 2 ? 'h' : 'v';
           // The heaviest hits slam a cross
-          if (fullBar(t, axis, homing, big ? 1.1 : 1) && difficulty !== 'easy' && heavy && heft >= SLAM && left >= cost('bar') * 2) {
+          const placed = fullBar(t, axis, homing, big ? 1.1 : 1);
+          if (placed && difficulty !== 'easy' && heavy && heft >= SLAM && left >= cost('bar') * 2) {
             fullBar(t, axis === 'h' ? 'v' : 'h', false, 1.1);
-          }
+          } else if (!placed && p.volleys) volley(t);
         }
         break;
 
@@ -1162,6 +1233,12 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
         }
         const span = 1 / STEP_LANES;
         push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + life, axis: stepAxis, at: (step + 0.5) * span, width: 0, span: span * 0.92, target: false });
+        // Raving music marches from the other side too, mirrored: the two meet in the middle and
+        // pass through each other, and each side is still only ever one lane to step over
+        const twin = STEP_LANES - 1 - step;
+        if (drive >= RAVE_MIRROR && difficulty !== 'easy' && twin !== step && budget.left(t, scale) >= cost('bar')) {
+          push({ kind: 'bar', warn: warnFor(t, (span * MAX_SPAN) / 2), hit: t, end: t + life, axis: stepAxis, at: (twin + 0.5) * span, width: 0, span: span * 0.92, target: false });
+        }
         step += stepDir;
         stepsSinceTurn++;
         if (step < 0 || step >= STEP_LANES) {
@@ -1177,7 +1254,9 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
         // Walls don't scale with speed fully: a wall much faster than the player can only be dashed
         const dur = (3.6 - 1.0 * sec.energy) / Math.sqrt(p.speed);
         // (the bars' heaviest hits wobble around the bar line, hence the slack)
-        if (heavy && barTop.has(i) && t - lastWall > Math.max(WALL_GAP_MIN, p.wallBars * 4 * beat - 0.1) && left >= cost('wall')) {
+        // Raving music brings them up to twice as often, on the half bar's heaviest hit
+        const every = p.wallBars * 4 * beat * (1 - 0.5 * drive);
+        if (heavy && (barTop.has(i) || (drive > 0.5 && halfTop.has(i))) && t - lastWall > Math.max(WALL_GAP_MIN, every - 0.1) && left >= cost('wall')) {
           // Keep the axis and direction within a run of walls; switch once things calm down
           if (t - lastWall > dur * 2) {
             lastAxis = r() < 0.5 ? 'h' : 'v';
@@ -1192,11 +1271,11 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
           for (let j = i + 1; j < a.onsetTimes.length && a.onsetTimes[j] < t + dur - LURCH * 2; j++) {
             if (w.prom[j] >= 0.5 && a.onsetTimes[j] - (kicks[kicks.length - 1] ?? t) >= 0.2) kicks.push(a.onsetTimes[j]);
           }
-          const wall = { kind: 'wall', warn: t - p.lead * 1.2, hit: t, end: t + dur, axis: lastAxis, from: lastFrom, gap, gapSize: p.gapSize, width: 6 + 6 * heft, kicks: kicks.length >= 3 ? kicks : undefined } as const;
+          const wall = { kind: 'wall', warn: t - p.lead * 1.2, hit: t, end: t + dur, axis: lastAxis, from: lastFrom, gap, gapSize: p.gapSize, width: (6 + 6 * heft) * (1 + 0.5 * drive), kicks: kicks.length >= 3 ? kicks : undefined } as const;
           push(wall);
           // The heaviest hits close in from both sides at once, gaps lined up
           if (heft >= 0.65 && difficulty !== 'easy' && budget.left(t, scale) >= cost('wall')) push({ ...wall, from: lastFrom === 0 ? 1 : 0 });
-        } else if (mid && voice === 'snare') {
+        } else if (mid && (voice === 'snare' || (voice === 'kick' && drive > 0.5))) {
           pop(t, big, Math.ceil(p.pops / 2));
         } else if (difficulty !== 'easy' && voice !== 'kick') {
           trailBomb(t);
@@ -1224,9 +1303,12 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
           pop(t, true);
         } else if (mid && voice === 'kick' && seeker(t)) {
           // Seeker placed
-        } else if (voice !== 'kick' && left >= cost('shot')) {
+        } else if (voice !== 'kick') {
+          // Raving music rains harder: bigger drops, two at a time
           const speed = (34 + 24 * heft) * p.speed * pace();
-          push({ kind: 'shot', warn: t - p.lead * 0.6, hit: t, end: t + 260 / speed, x: spot(), y: -0.02, angle: Math.PI / 2 + (r() - 0.5) * 0.3, speed, r: 1.2 + 1.6 * heft });
+          for (let k = drive >= RAVE_MIRROR && difficulty !== 'easy' ? 2 : 1; k > 0 && budget.left(t, scale) >= cost('shot'); k--) {
+            push({ kind: 'shot', warn: t - p.lead * 0.6, hit: t, end: t + 260 / speed, x: spot(), y: -0.02, angle: Math.PI / 2 + (r() - 0.5) * 0.3, speed, r: (1.2 + 1.6 * heft) * (1 + RAVE_SIZE * drive) });
+          }
         }
         break;
     }
@@ -1239,12 +1321,29 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
     }
   }
 
-  // Whatever is solid when the music stops freezes until it comes back
+  // What stays on screen throbs on the music's hits while it's solid, so the screen moves with
+  // every hit even when nothing new spawns on it (walls lurch on their beats instead)
+  const pulseHits: number[] = [];
+  for (let i = 0; i < a.onsetTimes.length; i++) {
+    if (w.prom[i] >= PULSE_PROM && (pulseHits.length === 0 || a.onsetTimes[i] - pulseHits[pulseHits.length - 1] >= PULSE_GAP)) pulseHits.push(a.onsetTimes[i]);
+  }
+  for (const hz of hazards) {
+    if (hz.kind === 'wall' || hz.kind === 'shot' || hz.kind === 'grid' || (hz.kind === 'bar' && hz.span) || hz.end - hz.hit < 0.3) continue;
+    // (the hit itself already pops it)
+    let lo = 0, hi = pulseHits.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (pulseHits[m] <= hz.hit + PULSE_GAP) lo = m + 1; else hi = m; }
+    const pulses: number[] = [];
+    for (let k = lo; k < pulseHits.length && pulseHits[k] < hz.end - 0.15; k++) pulses.push(pulseHits[k]);
+    if (pulses.length) hz.pulses = pulses;
+  }
+
+  // Whatever is solid when the music stops freezes until it comes back (no pulses in the silence)
   for (const [s0, s1] of rests) {
     for (const hz of hazards) {
       if (hz.hit < s0 && hz.end > s0 && !hz.freeze) {
         hz.freeze = [s0, s1];
         hz.end += s1 - s0;
+        if (hz.pulses) hz.pulses = hz.pulses.filter((q) => q < s0);
       }
     }
   }
@@ -1288,12 +1387,22 @@ export function buildShapesChart(a: TrackAnalysis, difficulty: Difficulty): Shap
       ahead[i] = last - 1;
     }
   }
-  const want = cover.map((c, i) => Math.max(Math.min(squeeze[i], scaleFor(c, COVER, ZOOM_CALM, ZOOM_WIDE)), Math.min(ZOOM_WIDE, biggest[i] / (100 * MAX_SPAN_SHARE))));
+  const driveAt = (i: number) => rave[Math.min(rave.length - 1, i)];
+  const fit = cover.map((c, i) => Math.min(squeeze[i], scaleFor(c, COVER + RAVE_COVER * driveAt(i), ZOOM_CALM, ZOOM_WIDE)));
+  const span = biggest.map((b, i) => Math.min(ZOOM_WIDE, b / (100 * (MAX_SPAN_SHARE + RAVE_SPAN * driveAt(i)))));
   const zoom = zoomCurve(a.duration, (t) => {
     const i = Math.round(t * ZOOM_RATE);
-    let m = 0;
-    for (let k = i; k <= Math.min(ahead[Math.min(n - 1, i)], i + ZOOM_RATE * 0.75); k++) m = Math.max(m, want[k]);
-    return m;
+    // Out in time for the biggest pile up ahead; raving music keeps piling up, so there it
+    // follows the average instead and the screen stays packed
+    let peak = 0, sum = 0, count = 0, wide = 0;
+    for (let k = i; k <= Math.min(ahead[Math.min(n - 1, i)], i + ZOOM_RATE * 0.75); k++) {
+      peak = Math.max(peak, fit[k]);
+      sum += fit[k];
+      count++;
+      wide = Math.max(wide, span[k]);
+    }
+    const d = driveAt(i);
+    return Math.max(wide, peak + (sum / Math.max(1, count) - peak) * d);
   });
   return { sections, runs, hazards, checkpoints, maxHp: p.hp, dashCooldown: p.dashCooldown, zoom, rests };
 }
@@ -1340,7 +1449,21 @@ function envelope(hz: Hazard, t: number) {
   // Lane bars don't pop: they'd spill into the lanes that are meant to be safe
   const pop = age < 0.1 && !(hz.kind === 'bar' && hz.span) ? 1.25 - 2.5 * age : 1;
   const tail = Math.min(1, (endOf(hz) - t) / 0.2);
-  return pop * Math.max(0, tail);
+  return Math.max(pop, pulseAt(hz, t)) * Math.max(0, tail);
+}
+
+/** The throb of the latest pulse at time t: 1 + PULSE_POP right on it, back to 1 after PULSE_TIME. */
+function pulseAt(hz: Hazard, t: number) {
+  const q = lastPulse(hz, t);
+  return q === null ? 1 : 1 + PULSE_POP * Math.max(0, 1 - (t - q) / PULSE_TIME);
+}
+
+/** The latest pulse at or before t, if any. */
+export function lastPulse(hz: Hazard, t: number) {
+  if (!hz.pulses) return null;
+  let last: number | null = null;
+  for (const q of hz.pulses) { if (q > t) break; last = q; }
+  return last;
 }
 
 /** How far through its sweep a wall is at time t, 0..1. */
@@ -1413,7 +1536,7 @@ export function geometry(hz: Hazard, songTime: number, arena: ArenaInfo): Geo[] 
         const lerp = (v: number[]) => v[i] + (v[i + 1] - v[i]) * u;
         // A section-long spinner's pivot follows the arena as it changes
         const [px, py, pw, ph] = playArea(arena, songTime);
-        return [{ type: 'line', x: px + lerp(x) * pw, y: py + lerp(y) * ph, angle: lerp(a), hw: (hz.width / 2) * tail }];
+        return [{ type: 'line', x: px + lerp(x) * pw, y: py + lerp(y) * ph, angle: lerp(a), hw: (hz.width / 2) * tail * pulseAt(hz, t) }];
       }
       const p = Math.min(1, Math.max(0, (t - hz.hit) / (endOf(hz) - hz.hit)));
       return [{ type: 'line', x: X(hz.x), y: Y(hz.y), angle: hz.a0 + (hz.a1 - hz.a0) * p, hw: (hz.width / 2) * tail }];
