@@ -20,10 +20,15 @@ const MAX_HZ = 16000;
 const PAST_SECONDS = 3;
 const FUTURE_SECONDS = 1.5;
 const TIMELINE_SHARE = 0.42;
+/** As a backdrop: the timeline's height in pixels, and the spectrum's share of the rest. */
+const BACKDROP_TIMELINE = 56;
+const BACKDROP_SPECTRUM = 0.6;
+/** The player's colour, for where the song is. */
+const PLAYHEAD = '64, 224, 255';
 
 let freqBuf: Uint8Array<ArrayBuffer> | null = null;
 
-function drawSpectrum(ctx: CanvasRenderingContext2D, analyser: AnalyserNode | null, w: number, h: number) {
+function drawSpectrum(ctx: CanvasRenderingContext2D, analyser: AnalyserNode | null, w: number, h: number, alpha: number) {
   if (!analyser) return;
   if (!freqBuf || freqBuf.length !== analyser.frequencyBinCount) freqBuf = new Uint8Array(analyser.frequencyBinCount);
   analyser.getByteFrequencyData(freqBuf);
@@ -39,7 +44,7 @@ function drawSpectrum(ctx: CanvasRenderingContext2D, analyser: AnalyserNode | nu
     for (let k = k0; k <= k1; k++) v = Math.max(v, freqBuf[k]);
     const value = v / 255;
     const barHeight = value * value * h * 0.92;
-    ctx.fillStyle = `rgba(255, 255, 255, ${0.1 + value * 0.75})`;
+    ctx.fillStyle = `rgba(255, 255, 255, ${(0.1 + value * 0.75) * alpha})`;
     ctx.fillRect(i * slot + slot * 0.1, h - barHeight, slot * 0.8, barHeight);
   }
 }
@@ -103,14 +108,21 @@ function drawTimeline(ctx: CanvasRenderingContext2D, f: VisualizerFrame, top: nu
 
   // Playhead
   const px = xOf(position);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.fillStyle = `rgba(${PLAYHEAD}, 0.8)`;
   ctx.fillRect(px - 0.5, top, 1, h);
 }
 
-export const Visualizer = forwardRef<VisualizerHandle>((_props, ref) => {
+interface VisualizerProps {
+  /** Fills what it's in, dimmed, to have something else on top. */
+  backdrop?: boolean;
+}
+
+export const Visualizer = forwardRef<VisualizerHandle, VisualizerProps>(({ backdrop = false }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const lastRef = useRef<VisualizerFrame>({ position: 0, analyser: null, analysis: null, intensityAt: null, shakeThreshold: 1 });
 
   const draw = (frame: VisualizerFrame) => {
+    lastRef.current = frame;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -125,18 +137,31 @@ export const Visualizer = forwardRef<VisualizerHandle>((_props, ref) => {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);
 
-    const timelineH = Math.round(h * TIMELINE_SHARE);
-    const gap = 10;
-    drawSpectrum(ctx, frame.analyser, w, h - timelineH - gap);
+    const timelineH = backdrop ? BACKDROP_TIMELINE : Math.round(h * TIMELINE_SHARE);
+    const gap = backdrop ? 0 : 10;
+    const specH = h - timelineH - gap;
+    if (backdrop) {
+      const top = specH * (1 - BACKDROP_SPECTRUM);
+      ctx.save();
+      ctx.translate(0, top);
+      drawSpectrum(ctx, frame.analyser, w, specH - top, 0.22);
+      ctx.restore();
+    } else {
+      drawSpectrum(ctx, frame.analyser, w, specH, 1);
+    }
     drawTimeline(ctx, frame, h - timelineH, w, timelineH);
   };
 
   useImperativeHandle(ref, () => ({ draw }));
 
-  // Draw an empty frame once so the timeline background shows before playback
+  // Draw an empty frame once so the timeline background shows before playback, and again when resized
   useEffect(() => {
-    draw({ position: 0, analyser: null, analysis: null, intensityAt: null, shakeThreshold: 1 });
-  }, []);
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ro = new ResizeObserver(() => draw(lastRef.current));
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  });
 
-  return <canvas ref={canvasRef} className={styles.canvas} />;
+  return <canvas ref={canvasRef} className={backdrop ? styles.backdrop : styles.canvas} />;
 });

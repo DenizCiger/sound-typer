@@ -15,13 +15,16 @@ bun run dev
 
 1. Drag and drop an audio file anywhere onto the app, or choose one in the menu
 2. Pick a style and difficulty and start
-3. For the typewriter, switch over with **Typewriter** in the menu (and back with **Game** in its toolbar)
 
-### Game mode
+**Esc** pauses and opens the menu, where style and difficulty can be changed at any time; the song goes on from the same place. The bar at the top is the song: click or drag to jump around in it, it snaps to checkpoints. **,** and **.** step through the checkpoints (10 s in Bullet hell and the typewriter), clicking the time while paused types one in, **1**–**5** pick the style while paused, the mouse wheel or **-** / **+** / **M** set the volume, **F** goes fullscreen.
 
-A rhythm game generated from the song, played with the keyboard (or touch). **Esc** pauses and opens the menu, where style and difficulty can be changed at any time; the song goes on from the same place. The bar at the top is the song: click or drag to jump around in it, it snaps to checkpoints. **,** and **.** step through the checkpoints (10 s in Bullet hell), **1**–**4** pick the style while paused, the mouse wheel or **-** / **+** / **M** set the volume, **F** goes fullscreen. Leaving the window pauses. Your health is right at the player, and the screen's edges glow red on the last one (both can be turned off in Settings).
+### Typewriter
 
-The styles:
+Types along with the music over a spectrum and a timeline of the hits. The text to type is picked in the menu or dropped onto the window; **C** clears the page. Its corner has the settings, so the feel can be tuned while it runs.
+
+### Game styles
+
+Rhythm games generated from the song, played with the keyboard (or touch). Leaving the window pauses. Your health is right at the player, and the screen's edges glow red on the last one (both can be turned off in Settings).
 
 **Bullet hell** — emitters charge up and fire on the beat: bass hits throw out rings, crisp hits fire aimed spreads, the biggest hits get a warned laser, and loud sections fill the screen with spirals.
 
@@ -64,9 +67,9 @@ Because the whole track is known in advance, playback just looks up features at 
 
 ### Customization
 
-- **Text source** — swap out the default text with your own via the text source button (top right)
-- **Volume** — in the toolbar or the game's menu (hidden on phones; use the hardware buttons)
-- **Visualizer** — spectrum on top; below it a timeline of the typing intensity and detected hits (bright ones shake), including a look-ahead past the playhead
+- **Text source** — swap out the default text with your own in the menu while the typewriter is picked
+- **Volume** — in the menu (hidden on phones; use the hardware buttons)
+- **Visualizer** — spectrum and a timeline of the typing intensity and detected hits (bright ones shake), including a look-ahead past the playhead
 - **Settings** (gear icon, shows what the current mode uses):
   - **Typing** — Speed (characters per second at full volume), Dynamics (higher = quiet parts slower, loud parts stand out), Punch (how hard hits slam text in), Hits complete words, Whitespace handling
   - **Game** — Respawn timer, show health, invincible (style and difficulty are in the menu)

@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type { TrackAnalysis } from '../audio/analysis';
 import { intensityAt } from '../game/common';
-import { formatTime } from '../format';
+import { formatTime, parseTime } from '../format';
 import { IconPause, IconPlay } from './icons';
 import styles from '../styles/SongBar.module.css';
 
@@ -55,8 +55,10 @@ export const SongBar = forwardRef<SongBarHandle, SongBarProps>(({
   analysis, checkpoints, isPlaying, open, onTogglePlay, onSeek, onScrub,
 }, ref) => {
   const barRef = useRef<HTMLDivElement>(null);
-  const timeRef = useRef<HTMLSpanElement>(null);
+  const timeRef = useRef<HTMLButtonElement | null>(null);
   const posRef = useRef(0);
+  /** The time as it's being typed in, null otherwise. */
+  const [typed, setTyped] = useState<string | null>(null);
   const [hover, setHover] = useState<{ t: number; snapped: boolean } | null>(null);
   const [dragging, setDragging] = useState(false);
   const draggingRef = useRef(false);
@@ -126,7 +128,39 @@ export const SongBar = forwardRef<SongBarHandle, SongBarProps>(({
       >
         {isPlaying ? <IconPause /> : <IconPlay />}
       </button>
-      <span ref={timeRef} className={styles.time}>0:00</span>
+      {typed !== null ? (
+        <input
+          className={`${styles.time} ${styles.timeInput}`}
+          value={typed}
+          style={{ width: `${Math.max(4, typed.length)}ch` }}
+          aria-label="Jump to time"
+          autoFocus
+          onFocus={(e) => e.target.select()}
+          onChange={(e) => setTyped(e.target.value)}
+          onBlur={() => setTyped(null)}
+          onKeyDown={(e) => {
+            if (e.key !== 'Enter' && e.key !== 'Escape') return;
+            e.stopPropagation();
+            const t = e.key === 'Enter' ? parseTime(typed) : null;
+            setTyped(null);
+            if (t !== null) onSeek(Math.min(t, Math.max(0, duration - 0.5)));
+          }}
+        />
+      ) : (
+        // While playing the keys belong to the game
+        <button
+          // Filled in by update(), which doesn't come while paused
+          ref={(el) => {
+            timeRef.current = el;
+            if (el) el.textContent = formatTime(posRef.current);
+          }}
+          className={styles.time}
+          disabled={isPlaying}
+          title={isPlaying ? undefined : 'Click to type a time'}
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setTyped(formatTime(posRef.current))}
+        />
+      )}
       <div
         ref={barRef}
         className={styles.bar}

@@ -39,6 +39,21 @@
   font-variant-numeric: tabular-nums;
   color: var(--text);
   opacity: 0.45;
+  padding: 0;
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  pointer-events: auto;
+}
+
+button.time:enabled {
+  cursor: pointer;
+}
+
+button.time:enabled:hover,
+.timeInput {
+  border-bottom-color: rgba(255, 255, 255, 0.4);
+  outline: none;
 }
 
 .open .time,

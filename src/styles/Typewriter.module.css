@@ -1,29 +1,24 @@
-.outer {
-  flex: 1;
-  min-height: 0;
-  position: relative;
+/* --hit is set per frame by the typewriter: 0 at rest, up to 1 right after a big hit */
+.page {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
+}
+
+.container {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  padding: 64px 28px 28px;
+  overflow: hidden;
+  /* The text slides out under the song bar */
+  mask-image: linear-gradient(to bottom, transparent 36px, #000 72px);
 }
 
 .narrow {
   width: var(--text-width);
   margin: 0 auto;
-}
-
-.container {
-  flex: 1;
-  background: var(--bg-light);
-  padding: 20px;
-  overflow-y: scroll;
-  overflow-x: hidden;
-  border-top: 1px solid var(--border);
-  min-height: 0;
-  scrollbar-width: none;
-}
-
-.container::-webkit-scrollbar {
-  display: none;
 }
 
 .spacer {
@@ -37,9 +32,8 @@
 
 .text {
   font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Courier New', monospace;
-  font-size: 14px;
+  font-size: 16px;
   line-height: 1.7;
-  /* --hit is set per frame by the typewriter: 0 at rest, up to 1 right after a big hit */
   color: color-mix(in srgb, var(--text) calc(var(--hit, 0) * 100%), var(--text-muted));
   text-shadow:
     0 0 calc(var(--glow, 0) * 8px) rgba(255, 255, 255, calc(var(--glow, 0) * 0.7)),
@@ -50,42 +44,17 @@
   display: inline-block;
 }
 
+/* The player here: a block in its colour that jumps with the hits */
 .cursor {
-  font-size: 14px;
-  color: inherit;
-  animation: blink 1s step-end infinite;
-}
-
-@keyframes blink {
-  50% { opacity: 0; }
-}
-
-.clearBtn {
-  position: absolute;
-  bottom: 14px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  background: var(--bg-light);
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
-  opacity: 0;
-}
-
-.outer:hover .clearBtn {
-  opacity: 1;
-}
-
-.clearBtn:hover {
-  background: var(--bg-hover);
-  border-color: rgba(255, 255, 255, 0.16);
-  color: var(--text);
+  display: inline-block;
+  width: 0.6em;
+  height: 1.15em;
+  margin-left: 2px;
+  vertical-align: -0.2em;
+  border-radius: 1px;
+  background: #40e0ff;
+  box-shadow: 0 0 calc(6px + var(--glow, 0) * 18px) rgba(64, 224, 255, calc(0.35 + var(--hit, 0) * 0.5));
+  transform: scale(calc(1 + var(--hit, 0) * 0.35));
 }
 
 @media (max-width: 767px) {
@@ -95,16 +64,11 @@
   }
 
   .container {
-    padding: 16px;
+    padding: 84px 16px 16px;
+    mask-image: linear-gradient(to bottom, transparent 56px, #000 88px);
   }
 
   .text {
-    font-size: 13px;
-  }
-
-  .clearBtn {
-    width: 44px;
-    height: 44px;
-    opacity: 1;
+    font-size: 14px;
   }
 }

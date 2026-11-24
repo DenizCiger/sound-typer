@@ -7,12 +7,12 @@ import { useAnimationLoop } from './hooks/useAnimationLoop';
 import { analyzeBuffer } from './audio/analyzeBuffer';
 import type { TrackAnalysis } from './audio/analysis';
 import { TypingDriver, type DriverFrame, type DriverParams } from './audio/driver';
-import { Controls } from './components/Controls';
+import type { Session } from './components/Stage';
 import { Visualizer, type VisualizerHandle } from './components/Visualizer';
 import { Typewriter, type TypewriterHandle } from './components/Typewriter';
 import { Game, type GameHandle } from './components/Game';
 import type { Difficulty } from './game/common';
-import type { GameStyle } from './game/types';
+import type { PlayStyle } from './game/options';
 import { Settings, type SettingsState, type FeelPrefs, type AppMode } from './components/Settings';
 
 const STORAGE_KEY = 'sound-typer-prefs';
@@ -115,6 +115,7 @@ export default function App() {
 
   const handleEnded = useCallback(() => {
     gameRef.current?.finish();
+    typewriterRef.current?.finish();
     setIsPlaying(false);
     setPlaybackPos(0);
   }, []);
@@ -161,6 +162,7 @@ export default function App() {
       handlePause();
     } else if (duration > 0) {
       gameRef.current?.start();
+      typewriterRef.current?.start();
       engine.play();
       setIsPlaying(true);
     }
@@ -185,14 +187,9 @@ export default function App() {
     handleSettingsChange({ ...DEFAULT_SETTINGS, mode: settings.mode, gameStyle: settings.gameStyle, difficulty: settings.difficulty });
   }, [handleSettingsChange, settings.mode, settings.gameStyle, settings.difficulty]);
 
-  const handleModeChange = useCallback((mode: AppMode) => {
-    // Into the game means into its menu first
-    if (mode === 'play') handlePause();
-    handleSettingsChange({ ...settings, mode });
-  }, [handleSettingsChange, handlePause, settings]);
-
-  const handleGameStyle = useCallback((gameStyle: GameStyle) => {
-    handleSettingsChange({ ...settings, gameStyle });
+  // The typewriter is a mode of its own; it leaves the game style alone
+  const handleStyleChange = useCallback((style: PlayStyle) => {
+    handleSettingsChange(style === 'type' ? { ...settings, mode: 'type' } : { ...settings, mode: 'play', gameStyle: style });
   }, [handleSettingsChange, settings]);
 
   const handleDifficulty = useCallback((difficulty: Difficulty) => {
@@ -236,8 +233,7 @@ export default function App() {
     const onLeave = (e: DragEvent) => { if (!e.relatedTarget) setFileDragging(false); };
     const onDrop = (e: DragEvent) => {
       setFileDragging(false);
-      // A chip in the toolbar took it
-      if (e.defaultPrevented || !e.dataTransfer?.files.length) return;
+      if (!e.dataTransfer?.files.length) return;
       e.preventDefault();
       const files = Array.from(e.dataTransfer.files);
       const song = files.find(isAudioFile);
@@ -272,7 +268,7 @@ export default function App() {
       gameRef.current?.frame(pos, dt);
     } else {
       const frame = driverRef.current?.step(pos, dt, params) ?? EMPTY_FRAME;
-      typewriterRef.current?.feed(frame, dt);
+      typewriterRef.current?.frame(pos, frame, dt);
     }
     drawVisualizer(pos);
 
@@ -291,76 +287,67 @@ export default function App() {
     if (!isPlaying) drawVisualizer(playbackPos);
   }, [isPlaying, playbackPos, drawVisualizer, showVisualizer]);
 
+  const session: Session = {
+    analysis,
+    status,
+    failed: loadFailed,
+    trackName,
+    isPlaying,
+    playbackPos,
+    volume: prefs.volume,
+    style: settings.mode === 'type' ? 'type' : settings.gameStyle,
+    difficulty: settings.difficulty,
+    textName: textSourceName,
+    showVisualizer,
+    getPosition: engine.getPosition,
+    onTogglePlay: handleTogglePlay,
+    onPause: handlePause,
+    onSeek: handleSeek,
+    onVolume: handleVolume,
+    onStyleChange: handleStyleChange,
+    onDifficultyChange: handleDifficulty,
+    onLoadFile: handleFile,
+    onLoadText: handleTextFile,
+    onRemoveText: handleRemoveTextSource,
+    onToggleVisualizer: handleToggleVisualizer,
+    onOpenSettings: () => setShowSettings(true),
+  };
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      {settings.mode === 'type' && <Controls
-        isPlaying={isPlaying}
-        trackName={trackName}
-        status={status}
-        playbackPos={playbackPos}
-        duration={duration}
-        volume={prefs.volume}
-        textSourceName={textSourceName}
-        showVisualizer={showVisualizer}
-        mode={settings.mode}
-        onModeChange={handleModeChange}
-        onTogglePlay={handleTogglePlay}
-        onSeek={handleSeek}
-        onLoad={handleFile}
-        onVolume={handleVolume}
-        onLoadText={handleTextFile}
-        onRemoveText={handleRemoveTextSource}
-        onToggleVisualizer={handleToggleVisualizer}
-        onOpenSettings={() => setShowSettings(true)}
-      />}
-      {showVisualizer && <Visualizer ref={visualizerRef} />}
+    <div className="app">
       {settings.mode === 'play' ? (
-        <Game
-          ref={gameRef}
-          analysis={analysis}
-          status={status}
-          failed={loadFailed}
-          trackName={trackName}
-          isPlaying={isPlaying}
-          playbackPos={playbackPos}
-          style={settings.gameStyle}
-          difficulty={settings.difficulty}
-          respawnDelay={settings.respawnDelay}
-          invincible={settings.invincible}
+        <>
+          {showVisualizer && <Visualizer ref={visualizerRef} />}
+          <Game
+            ref={gameRef}
+            session={session}
+            style={settings.gameStyle}
+            respawnDelay={settings.respawnDelay}
+            invincible={settings.invincible}
+            screenshake={settings.screenshake}
+            screenshakeMultiplier={settings.screenshakeMultiplier}
+            shakeThreshold={prefs.shakeThreshold}
+            glowIntensity={settings.glowIntensity}
+            cameraZoom={settings.cameraZoom}
+            partColors={settings.partColors}
+            showHealth={settings.showHealth}
+          />
+        </>
+      ) : (
+        <Typewriter
+          ref={typewriterRef}
+          session={session}
+          textSource={textSource || LOREM}
           screenshake={settings.screenshake}
           screenshakeMultiplier={settings.screenshakeMultiplier}
           shakeThreshold={prefs.shakeThreshold}
           glowIntensity={settings.glowIntensity}
-          cameraZoom={settings.cameraZoom}
-          partColors={settings.partColors}
-          showHealth={settings.showHealth}
-          volume={prefs.volume}
-          showVisualizer={showVisualizer}
-          getPosition={engine.getPosition}
-          onStyleChange={handleGameStyle}
-          onDifficultyChange={handleDifficulty}
-          onVolume={handleVolume}
-          onToggleVisualizer={handleToggleVisualizer}
-          onOpenSettings={() => setShowSettings(true)}
-          onLeave={() => handleModeChange('type')}
-          onTogglePlay={handleTogglePlay}
-          onPause={handlePause}
-          onSeek={handleSeek}
-          onLoadFile={handleFile}
+          snapToWords={settings.snapToWords}
+          cursorPosition={settings.cursorPosition}
+          textWidth={settings.textWidth}
+          whitespaceMode={settings.whitespaceMode}
+          backdrop={showVisualizer && <Visualizer ref={visualizerRef} backdrop />}
         />
-      ) : (
-      <Typewriter
-        ref={typewriterRef}
-        textSource={textSource || LOREM}
-        screenshake={settings.screenshake}
-        screenshakeMultiplier={settings.screenshakeMultiplier}
-        shakeThreshold={prefs.shakeThreshold}
-        glowIntensity={settings.glowIntensity}
-        snapToWords={settings.snapToWords}
-        cursorPosition={settings.cursorPosition}
-        textWidth={settings.textWidth}
-        whitespaceMode={settings.whitespaceMode}
-      />
       )}
       {fileDragging && <div className="drop-hint">Drop to load</div>}
       {showSettings && (

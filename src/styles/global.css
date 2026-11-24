@@ -26,8 +26,14 @@ body {
   flex-direction: column;
 }
 
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
 @media (max-width: 767px) {
-  body, #root {
+  body, #root, .app {
     height: 100dvh;
   }
 }

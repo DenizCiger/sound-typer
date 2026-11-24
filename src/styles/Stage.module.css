@@ -1,0 +1,101 @@
+.outer {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  background: #0d0d10;
+}
+
+.content {
+  position: absolute;
+  inset: 0;
+}
+
+.playing:not([data-cursor]) .content {
+  cursor: none;
+}
+
+.hud,
+.corner {
+  position: absolute;
+  z-index: 2;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.hud {
+  top: 15px;
+  left: 14px;
+  pointer-events: none;
+}
+
+.corner {
+  top: 8px;
+  right: 10px;
+  display: flex;
+  gap: 2px;
+  transition: opacity 150ms ease;
+}
+
+.corner button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 150ms ease, background 150ms ease;
+}
+
+.corner button:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Gone with the cursor */
+@media (hover: hover) {
+  .playing:not([data-cursor]) .corner {
+    opacity: 0;
+  }
+}
+
+.toast {
+  position: absolute;
+  z-index: 3;
+  top: 48px;
+  left: 50%;
+  padding: 4px 10px;
+  transform: translateX(-50%);
+  border-radius: 6px;
+  background: var(--bg-hover);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  pointer-events: none;
+}
+
+@media (max-width: 767px) {
+  .hud {
+    top: 56px;
+  }
+
+  .toast {
+    top: 60px;
+  }
+
+  .corner {
+    top: 6px;
+    right: 2px;
+  }
+
+  .corner button {
+    width: 40px;
+    height: 44px;
+  }
+}

@@ -16,7 +16,7 @@
   flex-direction: column;
   align-items: center;
   gap: 12px;
-  width: min(400px, 100%);
+  width: min(430px, 100%);
   padding: 20px 24px 16px;
   background: var(--bg-light);
   border: 1px solid var(--border);
@@ -61,7 +61,6 @@
 
 .track:hover,
 .iconBtn:hover,
-.textBtn:hover,
 .secondary button:hover {
   background: var(--bg-hover);
   color: var(--text);
@@ -109,6 +108,27 @@
   border: none;
   color: var(--text-muted);
   transition: background 150ms ease, color 150ms ease;
+}
+
+.segBtn:has(svg) {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.segBtn span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segBtn svg {
+  flex-shrink: 0;
+}
+
+.segIcon {
+  flex: 0 0 40px;
 }
 
 .segBtn + .segBtn {
@@ -233,8 +253,7 @@
   text-align: right;
 }
 
-.iconBtn,
-.textBtn {
+.iconBtn {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -248,10 +267,6 @@
   border-radius: 6px;
   color: var(--text-muted);
   transition: background 150ms ease, color 150ms ease;
-}
-
-.textBtn {
-  padding: 0 8px;
 }
 
 @media (hover: none) and (pointer: coarse) {
@@ -269,9 +284,14 @@
   .segBtn,
   .secondary button,
   .track,
-  .iconBtn,
-  .textBtn {
+  .iconBtn {
     min-height: 44px;
+  }
+
+  /* Five styles side by side */
+  .segBtn {
+    padding: 7px 2px;
+    font-size: 11px;
   }
 
   .iconBtn {

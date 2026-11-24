@@ -1,31 +1,9 @@
-.outer {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  overflow: hidden;
-  background: #0d0d10;
-}
-
 .canvas {
   display: block;
   width: 100%;
   height: 100%;
   touch-action: none;
   user-select: none;
-}
-
-.playing:not([data-cursor]) .canvas {
-  cursor: none;
-}
-
-.hits {
-  position: absolute;
-  top: 15px;
-  left: 14px;
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.35);
-  pointer-events: none;
 }
 
 /* Last health: felt from the corner of the eye */
@@ -38,28 +16,13 @@
   transition: opacity 200ms ease;
 }
 
-.outer[data-low] .low {
+.low[data-low] {
   animation: low 1s ease-in-out infinite alternate;
 }
 
 @keyframes low {
   from { opacity: 0.45; }
   to { opacity: 1; }
-}
-
-.toast {
-  position: absolute;
-  z-index: 3;
-  top: 48px;
-  left: 50%;
-  padding: 4px 10px;
-  transform: translateX(-50%);
-  border-radius: 6px;
-  background: var(--bg-hover);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-  pointer-events: none;
 }
 
 .respawn {
@@ -87,14 +50,4 @@
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-muted);
-}
-
-@media (max-width: 767px) {
-  .hits {
-    top: 56px;
-  }
-
-  .toast {
-    top: 60px;
-  }
 }

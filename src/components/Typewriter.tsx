@@ -1,24 +1,19 @@
-import { useRef, useImperativeHandle, forwardRef, useEffect } from 'react';
+import { useRef, useImperativeHandle, forwardRef, useEffect, useState, type ReactNode } from 'react';
 import type { TextWidth, WhitespaceMode } from './Settings';
 import type { DriverFrame } from '../audio/driver';
-import { LOREM, MAX_VISIBLE_LINES } from '../constants';
+import { MAX_VISIBLE_LINES } from '../constants';
+import { IconGear, IconTrash } from './icons';
+import { Stage, type Session, type StageHandle } from './Stage';
 import styles from '../styles/Typewriter.module.css';
 
 export interface TypewriterHandle {
-  /** Applies one frame of typing + effects. Returns the number of characters typed. */
-  feed: (frame: DriverFrame, dt: number) => number;
-  reset: () => void;
+  /** Types what the music did up to the audible position. */
+  frame: (pos: number, frame: DriverFrame, dt: number) => void;
+  /** The song ended: show the menu's end card. */
+  finish: () => void;
+  /** Playback is starting; begins on a blank page if the song was over. */
+  start: () => void;
 }
-
-const IconClear = () => (
-  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
-    <polyline points="3 6 5 6 21 6" />
-    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-    <path d="M10 11v6" />
-    <path d="M14 11v6" />
-    <path d="M9 6V4h6v2" />
-  </svg>
-);
 
 const WIDTH_MAP: Record<TextWidth, string | undefined> = {
   full: undefined,
@@ -37,18 +32,41 @@ const MAX_WORD_SNAP = 14;
 const MIN_SNAP_BURST = 5;
 
 interface TypewriterProps {
-  textSource?: string;
-  screenshake?: boolean;
-  screenshakeMultiplier?: number;
-  shakeThreshold?: number;
-  glowIntensity?: number;
-  snapToWords?: boolean;
-  cursorPosition?: 'bottom' | 'center';
-  textWidth?: TextWidth;
-  whitespaceMode?: WhitespaceMode;
+  session: Session;
+  textSource: string;
+  screenshake: boolean;
+  screenshakeMultiplier: number;
+  shakeThreshold: number;
+  glowIntensity: number;
+  snapToWords: boolean;
+  cursorPosition: 'bottom' | 'center';
+  textWidth: TextWidth;
+  whitespaceMode: WhitespaceMode;
+  /** Drawn behind the text. */
+  backdrop: ReactNode;
 }
 
-export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textSource = LOREM, screenshake = true, screenshakeMultiplier = 1, shakeThreshold = 0.6, glowIntensity = 1, snapToWords = true, cursorPosition = 'bottom', textWidth = 'full', whitespaceMode = 'none' }, ref) => {
+export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({
+  session, textSource, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, snapToWords, cursorPosition, textWidth, whitespaceMode, backdrop,
+}, ref) => {
+  const { analysis, isPlaying, getPosition, onTogglePlay, onSeek } = session;
+  const stageRef = useRef<StageHandle>(null);
+  const countRef = useRef<HTMLSpanElement>(null);
+  const typedRef = useRef(0);
+  const finishedRef = useRef(false);
+  const [results, setResults] = useState<number | null>(null);
+
+  // A new song: the old one's end card is out of date
+  const [prevAnalysis, setPrevAnalysis] = useState(analysis);
+  if (analysis !== prevAnalysis) {
+    setPrevAnalysis(analysis);
+    setResults(null);
+  }
+  useEffect(() => {
+    finishedRef.current = false;
+    stageRef.current?.update(getPosition());
+  }, [analysis, getPosition]);
+
   const outerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
@@ -136,6 +154,8 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
   };
 
   const doReset = () => {
+    typedRef.current = 0;
+    if (countRef.current) countRef.current.textContent = '0';
     linesRef.current = [''];
     sourceIndexRef.current = 0;
     shakeRef.current = { x: 0, y: 0, vx: 0, vy: 0, angle: 0 };
@@ -150,11 +170,28 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
     outerRef.current?.style.setProperty('--glow', '0');
   };
 
+  const seekTo = (t: number) => {
+    if (finishedRef.current) {
+      finishedRef.current = false;
+      setResults(null);
+      doReset();
+    }
+    onSeek(t);
+    stageRef.current?.update(t);
+  };
+
+  const restart = () => {
+    doReset();
+    seekTo(0);
+    if (!isPlaying) onTogglePlay();
+  };
+
   useImperativeHandle(ref, () => ({
-    feed(frame: DriverFrame, dt: number) {
+    frame(pos: number, frame: DriverFrame, dt: number) {
       const container = containerRef.current;
       const textEl = textRef.current;
-      if (!container || !textEl) return 0;
+      if (!container || !textEl) return;
+      stageRef.current?.update(pos);
       const p = propsRef.current;
 
       for (const hit of frame.hits) {
@@ -176,33 +213,69 @@ export const Typewriter = forwardRef<TypewriterHandle, TypewriterProps>(({ textS
         for (let i = 0; i < MAX_WORD_SNAP && !/\s/.test(peek()); i++) { typeOne(); count++; }
       }
       for (let i = 0; i < frame.flowChars; i++) { typeOne(); count++; }
-      if (count === 0) return 0;
+      if (count === 0) return;
+      typedRef.current += count;
+      if (countRef.current) countRef.current.textContent = String(typedRef.current);
 
       textEl.textContent = linesRef.current.join('\n');
       // Re-append cursor so it stays at the end
       if (cursorRef.current) textEl.appendChild(cursorRef.current);
 
       container.scrollTop = container.scrollHeight;
-      return count;
     },
 
-    reset: doReset,
+    finish() {
+      if (finishedRef.current) return;
+      finishedRef.current = true;
+      setResults(typedRef.current);
+    },
+
+    start() {
+      if (!finishedRef.current) return;
+      finishedRef.current = false;
+      setResults(null);
+      doReset();
+    },
   }));
 
   return (
-    <div ref={outerRef} className={`${styles.outer} ${WIDTH_MAP[textWidth] ? styles.narrow : ''}`} style={{ '--text-width': WIDTH_MAP[textWidth] } as React.CSSProperties}>
-      <div
-        ref={containerRef}
-        className={styles.container}
-      >
-        <span ref={textRef} className={styles.text}>
-          <span ref={cursorRef} className={styles.cursor}>|</span>
-        </span>
-        <div className={`${styles.spacer} ${cursorPosition === 'center' ? styles.spacerCenter : ''}`} />
+    <Stage
+      ref={stageRef}
+      session={session}
+      live={isPlaying}
+      results={results === null ? null : [['Characters typed', results]]}
+      checkpoints={null}
+      pauseAway={false}
+      hud={<>Typed <span ref={countRef}>0</span></>}
+      corner={
+        <>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={doReset} title="Clear the text (C)" aria-label="Clear the text"><IconTrash /></button>
+          <button onMouseDown={(e) => e.preventDefault()} onClick={session.onOpenSettings} title="Settings" aria-label="Settings"><IconGear /></button>
+        </>
+      }
+      actions={[{ label: 'Clear text', onClick: doReset }, { label: 'Restart song', onClick: restart }]}
+      onToggle={onTogglePlay}
+      onPause={session.onPause}
+      onSeek={seekTo}
+      onKey={(e) => {
+        if (e.code !== 'KeyC') return false;
+        doReset();
+        return true;
+      }}
+    >
+      <div ref={outerRef} className={styles.page}>
+        {backdrop}
+        <div
+          ref={containerRef}
+          className={`${styles.container} ${WIDTH_MAP[textWidth] ? styles.narrow : ''}`}
+          style={{ '--text-width': WIDTH_MAP[textWidth] } as React.CSSProperties}
+        >
+          <span ref={textRef} className={styles.text}>
+            <span ref={cursorRef} className={styles.cursor} />
+          </span>
+          <div className={`${styles.spacer} ${cursorPosition === 'center' ? styles.spacerCenter : ''}`} />
+        </div>
       </div>
-      <button className={styles.clearBtn} onClick={doReset} title="Clear output">
-        <IconClear />
-      </button>
-    </div>
+    </Stage>
   );
 });
