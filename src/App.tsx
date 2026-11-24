@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import './styles/global.css';
 import { LOREM } from './constants';
+import { isAudioFile } from './format';
 import { useAudioEngine } from './hooks/useAudioEngine';
 import { useAnimationLoop } from './hooks/useAnimationLoop';
 import { analyzeBuffer } from './audio/analyzeBuffer';
@@ -10,6 +11,7 @@ import { Controls } from './components/Controls';
 import { Visualizer, type VisualizerHandle } from './components/Visualizer';
 import { Typewriter, type TypewriterHandle } from './components/Typewriter';
 import { Game, type GameHandle } from './components/Game';
+import type { Difficulty } from './game/common';
 import type { GameStyle } from './game/types';
 import { Settings, type SettingsState, type FeelPrefs, type AppMode } from './components/Settings';
 
@@ -17,7 +19,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, partColors: true, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'type', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5, invincible: false };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, partColors: true, showHealth: true, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'play', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5, invincible: false };
 
 interface Prefs extends FeelPrefs {
   volume: number;
@@ -92,6 +94,8 @@ export default function App() {
   const [visualizerModes, setVisualizerModes] = useState<Record<AppMode, boolean>>({ type: true, play: false });
   const [settings, setSettings] = useState<SettingsState>(loadSettings);
   const [showSettings, setShowSettings] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [fileDragging, setFileDragging] = useState(false);
 
   const handleSettingsChange = useCallback((s: SettingsState) => {
     setSettings(s);
@@ -125,6 +129,7 @@ export default function App() {
     setAnalysis(null);
     setTrackName(file.name);
     setStatus('Decoding…');
+    setLoadFailed(false);
     try {
       const buffer = await engine.load(file);
       if (loadId !== loadIdRef.current) return;
@@ -138,20 +143,28 @@ export default function App() {
       setStatus(null);
     } catch (err) {
       console.error(err);
-      if (loadId === loadIdRef.current) setStatus('Could not load file');
+      if (loadId === loadIdRef.current) {
+        setStatus('Could not load file');
+        setLoadFailed(true);
+      }
     }
+  }, [engine]);
+
+  const handlePause = useCallback(() => {
+    engine.pause();
+    setIsPlaying(false);
+    setPlaybackPos(engine.getPosition());
   }, [engine]);
 
   const handleTogglePlay = useCallback(() => {
     if (isPlaying) {
-      engine.pause();
-      setIsPlaying(false);
+      handlePause();
     } else if (duration > 0) {
       gameRef.current?.start();
       engine.play();
       setIsPlaying(true);
     }
-  }, [isPlaying, engine, duration]);
+  }, [isPlaying, engine, duration, handlePause]);
 
   const handleSeek = useCallback((s: number) => {
     engine.seek(s);
@@ -166,28 +179,25 @@ export default function App() {
     setPrefs((p) => ({ ...p, ...feel }));
   }, []);
 
-  // Volume, mode and game style are left alone: they're not part of the "feel"
+  // Volume and what's picked in the game's menu are left alone: they're not part of the "feel"
   const handleReset = useCallback(() => {
     setPrefs((p) => ({ ...p, ...DEFAULT_FEEL }));
-    handleSettingsChange({ ...DEFAULT_SETTINGS, mode: settings.mode, gameStyle: settings.gameStyle });
-  }, [handleSettingsChange, settings.mode, settings.gameStyle]);
+    handleSettingsChange({ ...DEFAULT_SETTINGS, mode: settings.mode, gameStyle: settings.gameStyle, difficulty: settings.difficulty });
+  }, [handleSettingsChange, settings.mode, settings.gameStyle, settings.difficulty]);
 
   const handleModeChange = useCallback((mode: AppMode) => {
+    // Into the game means into its menu first
+    if (mode === 'play') handlePause();
     handleSettingsChange({ ...settings, mode });
-  }, [handleSettingsChange, settings]);
+  }, [handleSettingsChange, handlePause, settings]);
 
   const handleGameStyle = useCallback((gameStyle: GameStyle) => {
     handleSettingsChange({ ...settings, gameStyle });
   }, [handleSettingsChange, settings]);
 
-  const handleRestart = useCallback(() => {
-    if (duration <= 0) return;
-    engine.seek(0);
-    setPlaybackPos(0);
-    gameRef.current?.start();
-    engine.play();
-    setIsPlaying(true);
-  }, [engine, duration]);
+  const handleDifficulty = useCallback((difficulty: Difficulty) => {
+    handleSettingsChange({ ...settings, difficulty });
+  }, [handleSettingsChange, settings]);
 
   const showVisualizer = visualizerModes[settings.mode];
 
@@ -211,6 +221,38 @@ export default function App() {
     setTextSourceName(null);
     saveTextSource(null);
   }, []);
+
+  const handleToggleVisualizer = useCallback(() => {
+    setVisualizerModes((v) => ({ ...v, [settings.mode]: !v[settings.mode] }));
+  }, [settings.mode]);
+
+  // Files can be dropped anywhere: a song, or for the typewriter a text
+  useEffect(() => {
+    const onOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      setFileDragging(true);
+    };
+    const onLeave = (e: DragEvent) => { if (!e.relatedTarget) setFileDragging(false); };
+    const onDrop = (e: DragEvent) => {
+      setFileDragging(false);
+      // A chip in the toolbar took it
+      if (e.defaultPrevented || !e.dataTransfer?.files.length) return;
+      e.preventDefault();
+      const files = Array.from(e.dataTransfer.files);
+      const song = files.find(isAudioFile);
+      if (song) handleFile(song);
+      else if (settings.mode === 'type') handleTextFile(files[0]);
+    };
+    window.addEventListener('dragover', onOver);
+    window.addEventListener('dragleave', onLeave);
+    window.addEventListener('drop', onDrop);
+    return () => {
+      window.removeEventListener('dragover', onOver);
+      window.removeEventListener('dragleave', onLeave);
+      window.removeEventListener('drop', onDrop);
+    };
+  }, [handleFile, handleTextFile, settings.mode]);
 
   const drawVisualizer = useCallback((position: number) => {
     const driver = driverRef.current;
@@ -251,7 +293,7 @@ export default function App() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <Controls
+      {settings.mode === 'type' && <Controls
         isPlaying={isPlaying}
         trackName={trackName}
         status={status}
@@ -268,16 +310,19 @@ export default function App() {
         onVolume={handleVolume}
         onLoadText={handleTextFile}
         onRemoveText={handleRemoveTextSource}
-        onToggleVisualizer={() => setVisualizerModes((v) => ({ ...v, [settings.mode]: !v[settings.mode] }))}
+        onToggleVisualizer={handleToggleVisualizer}
         onOpenSettings={() => setShowSettings(true)}
-      />
+      />}
       {showVisualizer && <Visualizer ref={visualizerRef} />}
       {settings.mode === 'play' ? (
         <Game
           ref={gameRef}
           analysis={analysis}
           status={status}
+          failed={loadFailed}
+          trackName={trackName}
           isPlaying={isPlaying}
+          playbackPos={playbackPos}
           style={settings.gameStyle}
           difficulty={settings.difficulty}
           respawnDelay={settings.respawnDelay}
@@ -288,9 +333,18 @@ export default function App() {
           glowIntensity={settings.glowIntensity}
           cameraZoom={settings.cameraZoom}
           partColors={settings.partColors}
+          showHealth={settings.showHealth}
+          volume={prefs.volume}
+          showVisualizer={showVisualizer}
+          getPosition={engine.getPosition}
           onStyleChange={handleGameStyle}
+          onDifficultyChange={handleDifficulty}
+          onVolume={handleVolume}
+          onToggleVisualizer={handleToggleVisualizer}
+          onOpenSettings={() => setShowSettings(true)}
+          onLeave={() => handleModeChange('type')}
           onTogglePlay={handleTogglePlay}
-          onRestart={handleRestart}
+          onPause={handlePause}
           onSeek={handleSeek}
           onLoadFile={handleFile}
         />
@@ -308,6 +362,7 @@ export default function App() {
         whitespaceMode={settings.whitespaceMode}
       />
       )}
+      {fileDragging && <div className="drop-hint">Drop to load</div>}
       {showSettings && (
         <Settings
           settings={settings}

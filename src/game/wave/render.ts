@@ -1,5 +1,5 @@
 import type { Hit } from '../../audio/driver';
-import { prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
+import { HealthPips, prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
 import { ARENA_H, indexAtX, lowerBound, sectionAt, SPEED_STAGES, type WaveChart } from './chart';
 import type { WaveSim, WaveStep } from './sim';
@@ -53,6 +53,7 @@ export class WaveRenderer {
   private trail: { x: number; y: number }[] = [];
   private toasts: Toast[] = [];
   private shake = new Shake();
+  private pips = new HealthPips();
   private flash = 0;
   private pulse = 0;
   private time = 0;
@@ -77,6 +78,7 @@ export class WaveRenderer {
     this.trail = [];
     this.toasts = [];
     this.shake = new Shake();
+    this.pips.reset();
     this.flash = 0;
     this.pulse = 0;
     this.zoom = 0;
@@ -168,13 +170,14 @@ export class WaveRenderer {
     this.zoom *= Math.exp(-dt / 0.12);
     this.stageFlash *= Math.exp(-dt / 0.4);
     this.shake.step(dt);
+    this.pips.update(sim.hp, dt);
   }
 
   private rgb() {
     return this.color.map((c) => Math.round(c)).join(', ');
   }
 
-  draw(canvas: HTMLCanvasElement, sim: WaveSim) {
+  draw(canvas: HTMLCanvasElement, sim: WaveSim, fx: EffectSettings) {
     const c = prepareCanvas(canvas);
     if (!c) return;
     const { ctx, w, h, dpr } = c;
@@ -359,6 +362,8 @@ export class WaveRenderer {
       ctx.stroke();
       ctx.restore();
     }
+    // Health, riding along under the wave
+    if (fx.showHealth) this.pips.draw(ctx, sx(p.x), sy(p.y) + 5 * u, sim.hp, chart.maxHp, 1.1 * u, 0.5 * u, INK, 0.4 * u);
     ctx.restore();
 
     // ---- Overlays ----

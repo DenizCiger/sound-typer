@@ -13,8 +13,8 @@ export const PLAYER_RADIUS = 0.45;
 export const GRAZE_RADIUS = 3.2;
 const PLAYER_SPEED = 75;
 const FOCUS_SPEED = 32;
-const POINTER_SPEED = 170;
-const POINTER_FOCUS_SPEED = 65;
+const TOUCH_SPEED = 170;
+const TOUCH_FOCUS_SPEED = 65;
 const INVULN = 1.6;
 const HIT_CLEAR_RADIUS = 20;
 const SAFE_SPAWN_RADIUS = 10;
@@ -122,6 +122,10 @@ export class GameSim {
     this.areaScale = ZOOM_CALM;
   }
 
+  jump() {
+    this.lastPos = -1;
+  }
+
   /** The play area scale at which the bullets and lasers on screen cover COVER of it. */
   private wantScale() {
     const W = this.width, H = this.height;
@@ -207,7 +211,7 @@ export class GameSim {
       const [tx, ty] = input.target;
       const dx = tx - p.x, dy = ty - p.y;
       const dist = Math.hypot(dx, dy);
-      const max = (input.focus ? POINTER_FOCUS_SPEED : POINTER_SPEED) * dt;
+      const max = (input.focus ? TOUCH_FOCUS_SPEED : TOUCH_SPEED) * dt;
       if (dist <= max) { p.x = tx; p.y = ty; } else { p.x += (dx / dist) * max; p.y += (dy / dist) * max; }
     }
     this.keepInside();

@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { intensityAt } from '../common';
+import { intensityAt, SEEK_GRACE } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
 import type { ShieldChart, Side, Spear } from './chart';
 
@@ -9,7 +9,7 @@ const REWIND_GRACE = 2;
 const MAX_CATCHUP = 0.25;
 /** A spear still counts as blocked if the shield left its side this recently. */
 const EARLY = 0.05;
-/** The pointer has to be this far from the centre to aim the shield. */
+/** A finger has to be this far from the centre to aim the shield. */
 const AIM_DEADZONE = 2;
 
 export interface ShieldStep {
@@ -72,6 +72,13 @@ export class ShieldSim {
     this.invuln = 0;
     this.side = 0;
     this.seekTo(0);
+  }
+
+  jump() {
+    this.lastPos = -1;
+    this.pendingRewind = null;
+    this.expectRewind = null;
+    this.hp = this.chart.maxHp;
   }
 
   intensityAt(t: number) {
@@ -149,7 +156,7 @@ export class ShieldSim {
       } else if (jumped && pos < 0.1) {
         this.reset();
       } else if (jumped || pos > 0.5) {
-        this.invuln = Math.max(this.invuln, 0.5);
+        this.invuln = Math.max(this.invuln, SEEK_GRACE);
       }
       this.seekTo(pos);
       res.jumped = true;

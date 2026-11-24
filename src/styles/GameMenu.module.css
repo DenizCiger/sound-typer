@@ -1,0 +1,289 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  /* Not "center": a card taller than the screen would lose its top */
+  align-items: safe center;
+  justify-content: center;
+  padding: 56px 16px 16px;
+  overflow-y: auto;
+  background: rgba(9, 9, 11, 0.55);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(400px, 100%);
+  padding: 20px 24px 16px;
+  background: var(--bg-light);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+.card button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.track {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 5px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.track span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.track svg {
+  flex-shrink: 0;
+}
+
+.track:hover,
+.iconBtn:hover,
+.textBtn:hover,
+.secondary button:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.picker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 20px;
+  font-size: 13px;
+  background: transparent;
+  border: 1px dashed rgba(255, 255, 255, 0.2);
+  border-radius: 8px;
+  color: var(--text);
+  transition: background 150ms ease, border-color 150ms ease;
+}
+
+.picker:hover {
+  background: var(--bg-hover);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.picker small {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.segmented {
+  display: flex;
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.segBtn {
+  flex: 1;
+  padding: 7px 4px;
+  font-size: 12px;
+  white-space: nowrap;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.segBtn + .segBtn {
+  border-left: 1px solid var(--border);
+}
+
+.segBtn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.segBtnActive,
+.segBtnActive:hover {
+  color: var(--bg);
+  background: var(--text);
+}
+
+.primaryBtn {
+  width: 100%;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--text);
+  color: var(--bg);
+  border: none;
+  border-radius: 6px;
+  transition: opacity 150ms ease;
+}
+
+.primaryBtn:hover {
+  opacity: 0.85;
+}
+
+.secondary {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.secondary button {
+  flex: 1;
+  padding: 7px 10px;
+  font-size: 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.resultRows {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 24px;
+  width: 100%;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.resultRows span:nth-child(even) {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  color: var(--text);
+  text-align: right;
+}
+
+.help {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
+.help kbd {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 10px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text);
+}
+
+.touch {
+  display: none;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.volume input {
+  flex: 1;
+  min-width: 0;
+  height: 3px;
+  accent-color: #fafafa;
+  cursor: pointer;
+}
+
+.volume > span {
+  width: 4ch;
+  text-align: right;
+}
+
+.iconBtn,
+.textBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  min-width: 28px;
+  flex-shrink: 0;
+  font-size: 11px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.textBtn {
+  padding: 0 8px;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .keys {
+    display: none;
+  }
+
+  .touch {
+    display: inline;
+  }
+}
+
+@media (max-width: 767px) {
+  .primaryBtn,
+  .segBtn,
+  .secondary button,
+  .track,
+  .iconBtn,
+  .textBtn {
+    min-height: 44px;
+  }
+
+  .iconBtn {
+    min-width: 44px;
+  }
+
+  /* Phones have hardware volume buttons */
+  .volume {
+    display: none;
+  }
+
+  .footer {
+    justify-content: center;
+  }
+}

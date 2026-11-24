@@ -1,5 +1,5 @@
 import type { Hit } from '../../audio/driver';
-import { prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
+import { HealthPips, prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
 import { geometry, lastKick, lastPulse, playArea, type Geo, type Hazard } from './chart';
 import { PLAYER_SIZE, type ShapesSim, type ShapesStep } from './sim';
@@ -57,6 +57,7 @@ export class ShapesRenderer {
   private trail: { x: number; y: number; age: number }[] = [];
   private toasts: Toast[] = [];
   private shake = new Shake();
+  private pips = new HealthPips();
   private flash = 0;
   private pulse = 0;
   private time = 0;
@@ -87,6 +88,7 @@ export class ShapesRenderer {
     this.trail = [];
     this.toasts = [];
     this.shake = new Shake();
+    this.pips.reset();
     this.flash = 0;
     this.pulse = 0;
     this.zoom = 0;
@@ -189,6 +191,7 @@ export class ShapesRenderer {
     this.thump *= Math.exp(-dt / 0.2);
     this.zoom *= Math.exp(-dt / 0.12);
     this.shake.step(dt);
+    this.pips.update(sim.hp, dt);
   }
 
   private drawHazard(ctx: CanvasRenderingContext2D, hz: Hazard, sim: ShapesSim, u: number, reach: number, fx: EffectSettings) {
@@ -376,6 +379,10 @@ export class ShapesRenderer {
       ctx.lineWidth = 2;
       ctx.stroke();
     }
+
+    // Health, just under the player (over its head at the bottom edge)
+    const below = p.y + 4.9 < ay + ah;
+    if (fx.showHealth) this.pips.draw(ctx, p.x * u, (p.y + (below ? 4 : -4)) * u, sim.hp, sim.chart.maxHp, 1.15 * u, 0.5 * u, '255, 255, 255', 0.35 * u);
 
     // ---- Overlays ----
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

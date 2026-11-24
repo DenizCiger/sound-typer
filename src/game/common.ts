@@ -244,6 +244,61 @@ export function budgetWindow(perSecond: number) {
 // Same spring feel as the typewriter's screenshake
 const SHAKE_FREQ = 11;
 const SHAKE_DAMPING = 0.32;
+/** Seconds of invulnerability after jumping to another place in the song. */
+export const SEEK_GRACE = 1.5;
+
+/** How long the health pips stay bright after a hit, and how long the lost one takes to fade, seconds. */
+const PIPS_SHOW = 1.6;
+const PIPS_LOST = 0.7;
+const PIP_DANGER = '255, 48, 72';
+
+/**
+ * Health drawn right at the player, so it never takes a look away: a quiet row of pips that
+ * lights up when one is lost and blinks red on the last one.
+ */
+export class HealthPips {
+  private hp = -1;
+  private lost = 0;
+  private show = 0;
+  private time = 0;
+
+  reset() {
+    this.hp = -1;
+    this.lost = 0;
+    this.show = 0;
+  }
+
+  update(hp: number, dt: number) {
+    this.time += dt;
+    if (hp !== this.hp) {
+      if (this.hp >= 0) this.show = PIPS_SHOW;
+      this.lost = hp < this.hp ? PIPS_LOST : 0;
+      this.hp = hp;
+    }
+    this.show = Math.max(0, this.show - dt);
+    this.lost = Math.max(0, this.lost - dt);
+  }
+
+  /** Draws the row centred on (x, y). `size` and `gap` are in the context's units. */
+  draw(ctx: CanvasRenderingContext2D, x: number, y: number, hp: number, max: number, size: number, gap: number, ink: string, edge: number) {
+    const step = size + gap;
+    const x0 = x - (max * step - gap) / 2, y0 = y - size / 2;
+    const last = hp === 1;
+    const bright = Math.min(1, this.show / 0.4);
+    const alpha = last ? (Math.floor(this.time * 5) % 2 === 0 ? 1 : 0.55) : 0.6 + 0.4 * bright;
+    // A dark plate keeps them readable on top of hazards
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(x0 - edge, y0 - edge, max * step - gap + 2 * edge, size + 2 * edge);
+    for (let i = 0; i < max; i++) {
+      const px = x0 + i * step;
+      if (i < hp) ctx.fillStyle = `rgba(${last ? PIP_DANGER : ink}, ${alpha})`;
+      else if (i === hp && this.lost > 0) ctx.fillStyle = `rgba(${PIP_DANGER}, ${this.lost / PIPS_LOST})`;
+      else ctx.fillStyle = `rgba(${ink}, 0.18)`;
+      ctx.fillRect(px, y0, size, size);
+    }
+  }
+}
+
 export const SHAKE_MAX_PX = 12;
 
 /** Damped spring kicked by impacts; read x/y as the canvas offset. */

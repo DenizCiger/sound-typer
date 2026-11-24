@@ -32,12 +32,17 @@ export class WaveGame implements GameEngine {
     this.renderer.reset();
   }
 
+  jump() {
+    this.sim.jump();
+    this.renderer.reset();
+  }
+
   step(pos: number, dt: number, input: GameInput, hits: Hit[], fx: EffectSettings) {
     const res = this.sim.step(pos, dt, input);
     this.renderer.update(this.sim, res, hits, dt, fx);
   }
 
-  draw(canvas: HTMLCanvasElement) { this.renderer.draw(canvas, this.sim); }
+  draw(canvas: HTMLCanvasElement, fx: EffectSettings) { this.renderer.draw(canvas, this.sim, fx); }
 
   takeRewind() { return this.sim.takeRewind(); }
 

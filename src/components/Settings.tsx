@@ -16,6 +16,8 @@ export interface SettingsState {
   cameraZoom: number;
   /** Shapes: hazard colour changes with the song's parts (off: always pink). */
   partColors: boolean;
+  /** Game mode: health shown at the player. */
+  showHealth: boolean;
   snapToWords: boolean;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
@@ -43,19 +45,6 @@ const WIDTH_STOPS: { value: TextWidth; label: string }[] = [
   { value: 'large', label: 'Large' },
   { value: 'medium', label: 'Medium' },
   { value: 'small', label: 'Small' },
-];
-
-const DIFFICULTY_OPTIONS: { value: Difficulty; label: string }[] = [
-  { value: 'easy', label: 'Easy' },
-  { value: 'normal', label: 'Normal' },
-  { value: 'hard', label: 'Hard' },
-];
-
-const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
-  { value: 'bullets', label: 'Bullet hell' },
-  { value: 'shapes', label: 'Shapes' },
-  { value: 'wave', label: 'Wave' },
-  { value: 'shield', label: 'Shield' },
 ];
 
 const WHITESPACE_OPTIONS: { value: WhitespaceMode; label: string }[] = [
@@ -117,6 +106,7 @@ const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 const formatMultiplier = (v: number) => `${v}x`;
 
 export function Settings({ settings, feel, onChange, onFeelChange, onReset, onClose }: Props) {
+  const game = settings.mode === 'play';
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragPct, setDragPct] = useState<number | null>(null);
@@ -180,6 +170,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
           <button className={styles.closeBtn} onClick={onClose} aria-label="Close settings">×</button>
         </div>
 
+        {!game && <>
         <div className={styles.section}>Typing</div>
         <SliderRow
           label="Speed"
@@ -237,43 +228,10 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
             ))}
           </div>
         </div>
+        </>}
 
+        {game && <>
         <div className={styles.section}>Game</div>
-        <div className={styles.row}>
-          <div className={styles.labelGroup}>
-            <span className={styles.label}>Style</span>
-            <span className={styles.hint}>Dodge bullet patterns, dash through shapes, fly the wave, or block spears</span>
-          </div>
-          <div className={styles.segmented}>
-            {STYLE_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                className={`${styles.segBtn} ${settings.gameStyle === option.value ? styles.segBtnActive : ''}`}
-                onClick={() => onChange({ ...settings, gameStyle: option.value })}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className={styles.row}>
-          <div className={styles.labelGroup}>
-            <span className={styles.label}>Difficulty</span>
-            <span className={styles.hint}>Bullet density and speed</span>
-          </div>
-          <div className={styles.segmented}>
-            {DIFFICULTY_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                className={`${styles.segBtn} ${settings.difficulty === option.value ? styles.segBtnActive : ''}`}
-                onClick={() => onChange({ ...settings, difficulty: option.value })}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
         <SliderRow
           label="Respawn timer"
           hint="Pause on the checkpoint after a rewind (Shapes, Wave, Shield)"
@@ -285,6 +243,18 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
           onChange={(v) => onChange({ ...settings, respawnDelay: v })}
         />
         <div className={styles.row}>
+          <div className={styles.labelGroup}>
+            <span className={styles.label}>Show health</span>
+            <span className={styles.hint}>Pips at the player and a red glow on the last one</span>
+          </div>
+          <button
+            className={`${styles.toggle} ${settings.showHealth ? styles.toggleOn : ''}`}
+            onClick={() => onChange({ ...settings, showHealth: !settings.showHealth })}
+            aria-pressed={settings.showHealth}
+            aria-label="Show health"
+          />
+        </div>
+        <div className={styles.row}>
           <span className={styles.label}>Invincible</span>
           <button
             className={`${styles.toggle} ${settings.invincible ? styles.toggleOn : ''}`}
@@ -293,6 +263,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
             aria-label="Invincible"
           />
         </div>
+        </>}
 
         <div className={styles.section}>Effects</div>
         <div className={styles.row}>
@@ -336,9 +307,10 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
           format={(v) => (v === 0 ? 'Off' : formatMultiplier(v))}
           onChange={(v) => onChange({ ...settings, glowIntensity: v })}
         />
+        {game && <>
         <SliderRow
           label="Camera zoom"
-          hint="Game: in close when calm, out when it gets busy"
+          hint="In close when calm, out when it gets busy"
           min={0}
           max={2}
           step={0.25}
@@ -355,7 +327,9 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
             aria-label="Part colours"
           />
         </div>
+        </>}
 
+        {!game && <>
         <div className={styles.section}>Layout</div>
         <div className={styles.row}>
           <span className={styles.label}>Text anchor</span>
@@ -401,6 +375,7 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
             ))}
           </div>
         </div>
+        </>}
 
         <button className={styles.resetBtn} onClick={onReset}>Reset to defaults</button>
       </div>

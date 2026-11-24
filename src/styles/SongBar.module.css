@@ -1,0 +1,221 @@
+.row {
+  position: absolute;
+  z-index: 2;
+  top: 6px;
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(760px, calc(100% - 220px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.playBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  color: var(--text);
+  opacity: 0.5;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: opacity 150ms ease, background 150ms ease;
+}
+
+.playBtn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.time {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  opacity: 0.45;
+}
+
+.open .time,
+.row:hover .time {
+  opacity: 0.85;
+}
+
+/* Taller than it looks, so it's easy to hit */
+.bar {
+  --progress: 0%;
+  --segment-from: 0%;
+  --segment-to: 0%;
+  position: relative;
+  flex: 1;
+  height: 32px;
+  cursor: pointer;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+.bar:focus-visible {
+  outline: 1px solid rgba(255, 255, 255, 0.4);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.track {
+  position: absolute;
+  top: 14px;
+  left: 0;
+  right: 0;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.1);
+  transition: top 120ms ease, height 120ms ease, background 120ms ease;
+}
+
+.open .track,
+.bar:hover .track {
+  top: 2px;
+  height: 28px;
+  background: rgba(9, 9, 11, 0.75);
+}
+
+.wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 2px;
+  fill: rgba(255, 255, 255, 0.3);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.wavePlayed {
+  fill: rgba(255, 255, 255, 0.85);
+  clip-path: inset(0 calc(100% - var(--progress)) 0 0);
+}
+
+.open .wave,
+.bar:hover .wave {
+  opacity: 1;
+}
+
+/* The stretch until the next checkpoint */
+.segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--segment-from);
+  width: calc(var(--segment-to) - var(--segment-from));
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--progress);
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.55);
+  transition: opacity 120ms ease;
+}
+
+.open .fill,
+.bar:hover .fill {
+  opacity: 0;
+}
+
+.checkpoint {
+  position: absolute;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  transform: translateX(-50%) rotate(45deg);
+  background: #0d0d10;
+  border: 1.5px solid rgba(255, 255, 255, 0.5);
+}
+
+.open .checkpoint,
+.bar:hover .checkpoint {
+  bottom: -5px;
+}
+
+.checkpoint[data-reached] {
+  background: #fff;
+  border-color: #fff;
+}
+
+.head {
+  position: absolute;
+  top: 50%;
+  left: var(--progress);
+  width: 10px;
+  height: 10px;
+  transform: translate(-50%, -50%);
+  border-radius: 2px;
+  background: #22d3ee;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.7);
+}
+
+.open .head,
+.bar:hover .head {
+  width: 3px;
+  height: calc(100% + 4px);
+}
+
+.cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.7);
+  pointer-events: none;
+}
+
+.tip {
+  position: absolute;
+  top: 40px;
+  padding: 2px 7px;
+  transform: translateX(-50%);
+  border-radius: 4px;
+  background: var(--bg-hover);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text);
+  pointer-events: none;
+}
+
+/* Leaves the corner to Wave's speed meter */
+@media (max-width: 767px) {
+  .row {
+    left: 4px;
+    width: calc(100% - 90px);
+    gap: 6px;
+    transform: none;
+  }
+
+  .playBtn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .bar {
+    height: 44px;
+  }
+
+  .track {
+    top: 20px;
+  }
+
+  .open .track,
+  .bar:hover .track {
+    top: 8px;
+  }
+}

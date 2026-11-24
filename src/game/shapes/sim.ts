@@ -1,11 +1,11 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { intensityAt, sample, zoomAt } from '../common';
+import { intensityAt, sample, SEEK_GRACE, zoomAt } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
 import { distanceTo, geometry, playArea, PLAYER_SPEED, type ArenaInfo, type Hazard, type ShapesChart } from './chart';
 
 export const PLAYER_SIZE = 2.6;
 const PLAYER_RADIUS = 1.0;
-const POINTER_SPEED = 90;
+const TOUCH_SPEED = 90;
 const DASH_TIME = 0.1;
 const DASH_SPEED = 185;
 /** Invulnerability after the dash itself, so threading through a bar isn't frame perfect. */
@@ -85,6 +85,13 @@ export class ShapesSim {
     this.expectRewind = null;
   }
 
+  jump() {
+    this.lastPos = -1;
+    this.pendingRewind = null;
+    this.expectRewind = null;
+    this.hp = this.chart.maxHp;
+  }
+
   levelAt(t: number) {
     return sample(this.analysis.level, this.analysis.fps, t);
   }
@@ -133,7 +140,7 @@ export class ShapesSim {
       const dist = Math.hypot(dx, dy);
       if (dist > 0.01) {
         mx = dx / dist; my = dy / dist;
-        speed = Math.min(POINTER_SPEED, dist / Math.max(dt, 1e-3));
+        speed = Math.min(TOUCH_SPEED, dist / Math.max(dt, 1e-3));
       }
     }
     if (mx || my) { p.dirX = mx; p.dirY = my; }
@@ -181,6 +188,8 @@ export class ShapesSim {
         res.rewound = true;
       } else if (jumped && pos < 0.1) {
         this.reset();
+      } else if (jumped || pos > 0.5) {
+        this.player.invuln = Math.max(this.player.invuln, SEEK_GRACE);
       }
       this.resync(pos);
       this.lastPos = pos;

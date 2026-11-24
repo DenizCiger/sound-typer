@@ -8,7 +8,7 @@ export interface GameInput {
   dy: number;
   /** Slow movement (bullet hell). */
   focus: boolean;
-  /** Pointer target in world units, or null when the pointer isn't steering. */
+  /** Where a finger steers to in world units, or null. The mouse never steers. */
   target: [number, number] | null;
   /** Dash pressed since the last frame (shapes). */
   dash: boolean;
@@ -35,6 +35,8 @@ export interface EffectSettings {
   cameraZoom: number;
   /** Shapes: each part of the song gets its own hazard colour; off keeps them pink. */
   partColors: boolean;
+  /** Draw the health at the player. */
+  showHealth: boolean;
   /** Focus held: draw the hitbox brighter. */
   focus: boolean;
 }
@@ -60,6 +62,8 @@ export interface GameEngine {
   resize(w: number, h: number): void;
   /** Back to the start of a fresh run. */
   reset(): void;
+  /** The player picked another place in the song: the next step lands there with full health. */
+  jump(): void;
   /** Advances the game and its effects. `hits` are the music hits this frame. */
   step(pos: number, dt: number, input: GameInput, hits: Hit[], fx: EffectSettings): void;
   draw(canvas: HTMLCanvasElement, fx: EffectSettings): void;

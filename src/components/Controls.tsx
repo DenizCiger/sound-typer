@@ -1,180 +1,20 @@
 import { useRef, useState, type ReactNode } from "react";
 import type { AppMode } from "./Settings";
+import { formatTime, isAudioFile } from "../format";
+import {
+  IconBars,
+  IconGamepad,
+  IconGear,
+  IconKeyboard,
+  IconMusic,
+  IconPause,
+  IconPlay,
+  IconTextFile,
+  IconTrash,
+  IconUpload,
+  IconVolume,
+} from "./icons";
 import styles from "../styles/Controls.module.css";
-
-const IconPlay = () => (
-  <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
-    <polygon points="2,1 11,6 2,11" />
-  </svg>
-);
-
-const IconPause = () => (
-  <svg width="11" height="11" viewBox="0 0 12 12" fill="currentColor">
-    <rect x="2" y="1" width="3" height="10" rx="1" />
-    <rect x="7" y="1" width="3" height="10" rx="1" />
-  </svg>
-);
-
-export const IconMusic = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M9 18V5l12-2v13" />
-    <circle cx="6" cy="18" r="3" />
-    <circle cx="18" cy="16" r="3" />
-  </svg>
-);
-
-export const IconUpload = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-    <polyline points="17 8 12 3 7 8" />
-    <line x1="12" y1="3" x2="12" y2="15" />
-  </svg>
-);
-
-const IconVolume = () => (
-  <svg
-    width="14"
-    height="14"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-  </svg>
-);
-
-const IconTrash = () => (
-  <svg
-    width="11"
-    height="11"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <polyline points="3 6 5 6 21 6" />
-    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-    <path d="M10 11v6" />
-    <path d="M14 11v6" />
-    <path d="M9 6V4h6v2" />
-  </svg>
-);
-
-const IconTextFile = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V10z" />
-    <polyline points="14 2 14 8 20 8" />
-    <line x1="8" y1="13" x2="16" y2="13" />
-    <line x1="8" y1="17" x2="12" y2="17" />
-  </svg>
-);
-
-const IconGear = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <circle cx="12" cy="12" r="3" />
-    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
-  </svg>
-);
-
-const IconKeyboard = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <rect x="2" y="6" width="20" height="12" rx="2" />
-    <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" />
-  </svg>
-);
-
-const IconGamepad = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <path d="M6 12h4M8 10v4" />
-    <circle cx="15" cy="13" r="0.5" />
-    <circle cx="18" cy="11" r="0.5" />
-    <path d="M17.32 5H6.68a4 4 0 0 0-3.98 3.59L2 15a3 3 0 0 0 5.4 1.8L9 15h6l1.6 1.8A3 3 0 0 0 22 15l-.7-6.41A4 4 0 0 0 17.32 5z" />
-  </svg>
-);
-
-const IconBars = () => (
-  <svg
-    width="12"
-    height="12"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.75"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-  >
-    <line x1="12" y1="20" x2="12" y2="10" />
-    <line x1="18" y1="20" x2="18" y2="4" />
-    <line x1="6" y1="20" x2="6" y2="16" />
-  </svg>
-);
-
-function formatTime(s: number) {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
 
 interface SliderProps {
   icon: ReactNode;
@@ -300,7 +140,7 @@ export function Controls({
     e.preventDefault();
     setAudioChipDragging(false);
     const f = Array.from(e.dataTransfer.files).find((file) =>
-      file.type.startsWith("audio/")
+      isAudioFile(file)
     );
     if (f) onLoad(f);
   };
@@ -424,6 +264,15 @@ export function Controls({
 
       <div className={styles.modeToggle} role="group" aria-label="Mode">
         <button
+          className={`${styles.modeBtn} ${mode === "play" ? styles.modeBtnActive : ""}`}
+          onClick={() => onModeChange("play")}
+          aria-pressed={mode === "play"}
+          title="Rhythm game played to the music"
+        >
+          <IconGamepad />
+          <span>Game</span>
+        </button>
+        <button
           className={`${styles.modeBtn} ${mode === "type" ? styles.modeBtnActive : ""}`}
           onClick={() => onModeChange("type")}
           aria-pressed={mode === "type"}
@@ -431,15 +280,6 @@ export function Controls({
         >
           <IconKeyboard />
           <span>Type</span>
-        </button>
-        <button
-          className={`${styles.modeBtn} ${mode === "play" ? styles.modeBtnActive : ""}`}
-          onClick={() => onModeChange("play")}
-          aria-pressed={mode === "play"}
-          title="Rhythm game: dodge bullets fired to the music"
-        >
-          <IconGamepad />
-          <span>Game</span>
         </button>
       </div>
 

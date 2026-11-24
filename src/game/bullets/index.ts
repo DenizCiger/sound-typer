@@ -31,6 +31,11 @@ export class BulletGame implements GameEngine {
     this.renderer.reset();
   }
 
+  jump() {
+    this.sim.jump();
+    this.renderer.reset();
+  }
+
   step(pos: number, dt: number, input: GameInput, hits: Hit[], fx: EffectSettings) {
     this.sim.zoomAmount = fx.cameraZoom;
     const res = this.sim.step(pos, dt, input);

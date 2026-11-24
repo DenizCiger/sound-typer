@@ -7,8 +7,10 @@ import { BulletGame } from '../game/bullets';
 import { ShapesGame } from '../game/shapes';
 import { WaveGame } from '../game/wave';
 import { ShieldGame } from '../game/shield';
+import { STYLE_OPTIONS } from '../game/options';
 import styles from '../styles/Game.module.css';
-import { IconUpload } from './Controls';
+import { GameMenu } from './GameMenu';
+import { SongBar, type SongBarHandle } from './SongBar';
 
 export interface GameHandle {
   /** Advances the game to the audible position and draws it. */
@@ -22,7 +24,12 @@ export interface GameHandle {
 interface GameProps {
   analysis: TrackAnalysis | null;
   status: string | null;
+  /** Loading the song failed; `status` says so. */
+  failed: boolean;
+  trackName: string;
   isPlaying: boolean;
+  /** Where playback is, as the app last showed it. */
+  playbackPos: number;
   style: GameStyle;
   difficulty: Difficulty;
   /** Seconds to wait on the checkpoint after a rewind before the song resumes. */
@@ -35,12 +42,23 @@ interface GameProps {
   glowIntensity: number;
   cameraZoom: number;
   partColors: boolean;
+  /** Health pips at the player and the glow on the last one. */
+  showHealth: boolean;
+  volume: number;
+  showVisualizer: boolean;
+  /** The audible position right now. */
+  getPosition: () => number;
   onStyleChange: (style: GameStyle) => void;
+  onDifficultyChange: (difficulty: Difficulty) => void;
+  onVolume: (v: number) => void;
+  onToggleVisualizer: () => void;
+  onOpenSettings: () => void;
+  /** Over to the typewriter. */
+  onLeave: () => void;
   onTogglePlay: () => void;
-  onRestart: () => void;
-  /** Loads an audio file (shown as a picker while no song is loaded). */
+  onPause: () => void;
   onLoadFile: (file: File) => void;
-  /** Rewinds the song (checkpoints). */
+  /** Moves the song (checkpoint rewinds, jumps). */
   onSeek: (seconds: number) => void;
 }
 
@@ -51,9 +69,16 @@ interface Results {
 
 // Only used for hit detection, the typing speed doesn't matter here
 const HIT_PARAMS: DriverParams = { maxCps: 0, dynamics: 1, punch: 0 };
+const NO_CHECKPOINTS: readonly number[] = [];
 const NO_INPUT: GameInput = { dx: 0, dy: 0, focus: false, target: null, dash: false, hold: false, facing: null };
 const TAP_MS = 200;
-const MOUSE_TAKEOVER_PX = 12;
+/** The cursor hides this long after it was last moved while playing. */
+const CURSOR_IDLE_MS = 1500;
+const TOAST_MS = 1000;
+/** Stepping back goes to the checkpoint before if the last one is closer than this, seconds. */
+const STEP_BACK_SLACK = 2;
+/** How far , and . jump without checkpoints, seconds. */
+const STEP_PLAIN = 10;
 
 const KEYS: Record<string, [number, number]> = {
   ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0],
@@ -67,13 +92,6 @@ const KEY_SIDES: Record<string, number> = {
 const DASH_KEYS = new Set(['Space', 'KeyX', 'KeyK', 'KeyJ', 'ShiftLeft', 'ShiftRight']);
 const HOLD_KEYS = new Set([...DASH_KEYS, 'ArrowUp', 'KeyW']);
 
-const STYLE_OPTIONS: { value: GameStyle; label: string }[] = [
-  { value: 'bullets', label: 'Bullet hell' },
-  { value: 'shapes', label: 'Shapes' },
-  { value: 'wave', label: 'Wave' },
-  { value: 'shield', label: 'Shield' },
-];
-
 function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Difficulty): GameEngine {
   if (style === 'shapes') return new ShapesGame(analysis, difficulty);
   if (style === 'wave') return new WaveGame(analysis, difficulty);
@@ -82,31 +100,31 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  analysis, status, isPlaying, style, difficulty, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors,
-  onStyleChange, onTogglePlay, onRestart, onSeek, onLoadFile,
+  analysis, status, failed, trackName, isPlaying, playbackPos, style, difficulty, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, volume, showVisualizer,
+  getPosition, onStyleChange, onDifficultyChange, onVolume, onToggleVisualizer, onOpenSettings, onLeave, onTogglePlay, onPause, onSeek, onLoadFile,
 }, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hitsRef = useRef<HTMLSpanElement>(null);
-  const healthRef = useRef<HTMLSpanElement>(null);
-  const progressRef = useRef<HTMLDivElement>(null);
+  const outerRef = useRef<HTMLDivElement>(null);
+  const songBarRef = useRef<SongBarHandle>(null);
   const keysRef = useRef(new Set<string>());
   const dashRef = useRef(false);
   const facingRef = useRef<number | null>(null);
-  const pointerRef = useRef<{
+  const touchRef = useRef<{
     target: [number, number] | null;
+    /** From the first finger to the player, so it steers relative to where it went down. */
     offset: [number, number] | null;
-    pressed: boolean;
     touches: number;
     downAt: number;
-    /** Last mouse position seen, in client pixels. */
-    client: [number, number] | null;
-    /** Where the mouse was when the keyboard took over; null while the mouse steers. */
-    keyboardAt: [number, number] | null;
-  }>({ target: null, offset: null, pressed: false, touches: 0, downAt: 0, client: null, keyboardAt: null });
+  }>({ target: null, offset: null, touches: 0, downAt: 0 });
+  const cursorTimerRef = useRef(0);
+  const toastTimerRef = useRef(0);
+  const unmutedRef = useRef(0.1);
+  const leavingFullscreenRef = useRef(false);
   const finishedRef = useRef(false);
   const [results, setResults] = useState<Results | null>(null);
-  const [fileDragging, setFileDragging] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [scrubbing, setScrubbing] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   /** performance.now() when the respawn countdown ends and the song resumes; null when not respawning. */
   const [respawnUntil, setRespawnUntil] = useState<number | null>(null);
   const countdownRef = useRef<HTMLDivElement>(null);
@@ -125,11 +143,11 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   if (isPlaying && respawnUntil !== null) setRespawnUntil(null);
   const respawning = respawnUntil !== null;
 
-  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, focus: false });
-  const propsRef = useRef({ engine, style, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek });
+  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, focus: false });
+  const propsRef = useRef({ engine, style, respawnDelay, invincible, isPlaying, respawning, volume, getPosition, onStyleChange, onVolume, onTogglePlay, onPause, onSeek });
   useEffect(() => {
-    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors };
-    propsRef.current = { engine, style, respawnDelay, invincible, isPlaying, respawning, onTogglePlay, onSeek };
+    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth };
+    propsRef.current = { engine, style, respawnDelay, invincible, isPlaying, respawning, volume, getPosition, onStyleChange, onVolume, onTogglePlay, onPause, onSeek };
   });
 
   const toWorld = (clientX: number, clientY: number): [number, number] | null => {
@@ -153,27 +171,84 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     const e = propsRef.current.engine;
     if (!e) return;
     if (hitsRef.current) hitsRef.current.textContent = String(e.stats.hits);
-    if (healthRef.current && e.health) {
-      healthRef.current.textContent = '■'.repeat(Math.max(0, e.health.hp)) + '□'.repeat(Math.max(0, e.health.max - e.health.hp));
+    outerRef.current?.toggleAttribute('data-low', fxRef.current.showHealth && e.health?.hp === 1);
+    songBarRef.current?.update(e.position);
+  };
+
+  /** The player picks another place in the song. */
+  const seekTo = (t: number) => {
+    const p = propsRef.current;
+    const e = p.engine;
+    if (!e) return;
+    if (finishedRef.current) {
+      finishedRef.current = false;
+      setResults(null);
+      e.reset();
     }
-    const bar = progressRef.current;
-    if (bar && e.checkpoints) {
-      const pos = Math.min(e.position, e.duration);
-      const share = (t: number) => `${(100 * t) / Math.max(1e-3, e.duration)}%`;
-      // The stretch from the checkpoint you'd rewind to up to the next one (or the end)
-      let from = 0, to = e.duration;
-      for (const c of e.checkpoints) {
-        if (c <= pos) from = c;
-        else { to = c; break; }
-      }
-      bar.style.setProperty('--progress', share(pos));
-      bar.style.setProperty('--segment-from', share(from));
-      bar.style.setProperty('--segment-to', share(to));
-      for (const el of bar.querySelectorAll<HTMLElement>('[data-at]')) {
-        el.toggleAttribute('data-reached', Number(el.dataset.at) <= pos);
-      }
+    if (t < 0.05) e.reset();
+    else e.jump();
+    e.step(t, 0, NO_INPUT, [], fxRef.current);
+    p.onSeek(t);
+    redraw();
+    updateHud();
+  };
+
+  const lastCheckpoint = (pos: number) => (propsRef.current.engine?.checkpoints ?? []).reduce((best, c) => (c <= pos ? c : best), 0);
+
+  /** To the previous (-1) or next (1) checkpoint, or a few seconds where there are none. */
+  const seekStep = (dir: -1 | 1) => {
+    const e = propsRef.current.engine;
+    if (!e) return;
+    const pos = e.position;
+    if (!e.checkpoints) seekTo(Math.min(e.duration - 0.5, Math.max(0, pos + dir * STEP_PLAIN)));
+    else if (dir < 0) seekTo(lastCheckpoint(pos - STEP_BACK_SLACK));
+    else {
+      const next = e.checkpoints.find((c) => c > pos + 0.05);
+      if (next !== undefined) seekTo(next);
     }
   };
+
+  const restart = (from: number) => {
+    seekTo(from);
+    if (!propsRef.current.isPlaying) propsRef.current.onTogglePlay();
+  };
+
+  const setVolume = (v: number) => {
+    const clamped = Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
+    propsRef.current.onVolume(clamped);
+    setToast(clamped > 0 ? `Volume ${Math.round(clamped * 100)}%` : 'Muted');
+    clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), TOAST_MS);
+  };
+  // Finer steps where it's quiet: a few percent there are as much as a lot further up
+  const stepVolume = (dir: number) => {
+    const v = propsRef.current.volume;
+    setVolume(v + dir * (v + dir * 0.005 < 0.2 ? 0.01 : 0.05));
+  };
+  const toggleMute = () => {
+    const v = propsRef.current.volume;
+    if (v > 0) unmutedRef.current = v;
+    setVolume(v > 0 ? 0 : unmutedRef.current);
+  };
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) {
+      leavingFullscreenRef.current = true;
+      document.exitFullscreen().catch(() => {});
+      return;
+    }
+    document.documentElement.requestFullscreen().then(() => {
+      // Where supported, Esc keeps pausing in fullscreen (hold it to leave)
+      const keyboard = (navigator as { keyboard?: { lock?: (keys: string[]) => Promise<void> } }).keyboard;
+      keyboard?.lock?.(['Escape']).catch(() => {});
+    }).catch(() => {});
+  };
+
+  // Always the latest, for the listeners below that are added once
+  const actionsRef = useRef({ seekStep, stepVolume, toggleMute, toggleFullscreen });
+  useEffect(() => {
+    actionsRef.current = { seekStep, stepVolume, toggleMute, toggleFullscreen };
+  });
 
   // New engine: fresh run
   useEffect(() => {
@@ -182,6 +257,9 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     if (engine && canvas) {
       engine.resize(canvas.clientWidth, canvas.clientHeight);
       engine.reset();
+      // Switched styles in the middle of the song: go on from there
+      const pos = propsRef.current.getPosition();
+      engine.step(pos, 0, NO_INPUT, [], fxRef.current);
     }
     updateHud();
     redraw();
@@ -199,25 +277,39 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   }, []);
 
   useEffect(() => {
-    const isTyping = (e: KeyboardEvent) => e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
     const onDown = (e: KeyboardEvent) => {
-      if (isTyping(e)) return;
       const p = propsRef.current;
-      const shapes = p.style === 'shapes';
+      const actions = actionsRef.current;
+      // The settings have the keyboard while they're open
+      if (document.querySelector('[aria-modal="true"]') || e.ctrlKey || e.metaKey || e.altKey) return;
       // The respawn countdown counts as playing, so dashing or flying doesn't resume early
       const live = p.isPlaying || p.respawning;
+      const el = e.target instanceof HTMLInputElement ? e.target : null;
+      if (e.target instanceof HTMLTextAreaElement || (el && el.type !== 'range')) return;
+      // Arrows move a focused slider in the menu
+      if (el && !live && e.code.startsWith('Arrow')) return;
       if (e.code === 'Space') {
         e.preventDefault();
         // Otherwise a focused button would also get "clicked" by the space key
         (document.activeElement as HTMLElement | null)?.blur();
       }
-      if (e.code === 'KeyP' || (e.code === 'Escape' && !document.querySelector('[aria-modal="true"]'))) {
-        if (p.isPlaying && !e.repeat) p.onTogglePlay();
-        else if (p.respawning) setRespawnUntil(null);
+      if (e.code === 'KeyP' || e.code === 'Escape') {
+        if (e.repeat) return;
+        if (p.respawning) setRespawnUntil(null);
+        else if (p.isPlaying || (!finishedRef.current && (p.engine?.position ?? 0) > 0.05)) p.onTogglePlay();
         return;
       }
+      if (e.key === ',' || e.key === '.') { actions.seekStep(e.key === ',' ? -1 : 1); return; }
+      if (e.key === '+' || e.key === '=' || e.key === '-') { actions.stepVolume(e.key === '-' ? -1 : 1); return; }
+      if (e.code === 'KeyM') { if (!e.repeat) actions.toggleMute(); return; }
+      if (e.code === 'KeyF') { if (!e.repeat) actions.toggleFullscreen(); return; }
+      if (!live) {
+        const pick = /^(?:Digit|Numpad)(\d)$/.exec(e.code);
+        const option = pick && STYLE_OPTIONS[Number(pick[1]) - 1];
+        if (option) { p.onStyleChange(option.value); return; }
+      }
       // Space dashes in Shapes while playing, otherwise it's play/pause
-      if (shapes && live && DASH_KEYS.has(e.code)) {
+      if (p.style === 'shapes' && live && DASH_KEYS.has(e.code)) {
         if (!e.repeat) dashRef.current = true;
         return;
       }
@@ -234,30 +326,49 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       if (p.style === 'shield' && e.code in KEY_SIDES && !e.repeat) facingRef.current = KEY_SIDES[e.code];
       if (KEYS[e.code] || e.key === 'Shift') {
         keysRef.current.add(e.code);
-        if (KEYS[e.code]) {
-          e.preventDefault();
-          // The keyboard takes over until the mouse is moved away from where it rests, otherwise
-          // the cursor would pull the player back the moment the keys are released
-          const ptr = pointerRef.current;
-          if (ptr.offset === null) {
-            ptr.target = null;
-            // Position unknown yet: the next mouse event marks where it rests
-            ptr.keyboardAt = ptr.client ?? [NaN, NaN];
-          }
-        }
+        if (KEYS[e.code]) e.preventDefault();
       }
     };
     const onUp = (e: KeyboardEvent) => keysRef.current.delete(e.code);
-    const onBlur = () => keysRef.current.clear();
+    // Looking elsewhere: the keys don't arrive here any more, so wait
+    const pause = () => {
+      setRespawnUntil(null);
+      propsRef.current.onPause();
+    };
+    const onBlur = () => {
+      keysRef.current.clear();
+      pause();
+    };
+    const onVisibility = () => { if (document.hidden) pause(); };
+    // Where Esc can't be kept from leaving fullscreen, it pauses all the same
+    const onFullscreen = () => {
+      if (document.fullscreenElement) return;
+      if (!leavingFullscreenRef.current) pause();
+      leavingFullscreenRef.current = false;
+    };
     window.addEventListener('keydown', onDown);
     window.addEventListener('keyup', onUp);
     window.addEventListener('blur', onBlur);
+    document.addEventListener('visibilitychange', onVisibility);
+    document.addEventListener('fullscreenchange', onFullscreen);
     return () => {
       window.removeEventListener('keydown', onDown);
       window.removeEventListener('keyup', onUp);
       window.removeEventListener('blur', onBlur);
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.removeEventListener('fullscreenchange', onFullscreen);
     };
   }, []);
+
+  // Nothing in the menu keeps the focus once the song runs, and effect settings show right away
+  useEffect(() => {
+    if (isPlaying) (document.activeElement as HTMLElement | null)?.blur();
+  }, [isPlaying]);
+  useEffect(() => {
+    if (propsRef.current.isPlaying) return;
+    redraw();
+    updateHud();
+  }, [glowIntensity, cameraZoom, partColors, showHealth]);
 
   const readInput = (): GameInput => {
     const keys = keysRef.current;
@@ -266,16 +377,15 @@ export const Game = forwardRef<GameHandle, GameProps>(({
       const k = KEYS[code];
       if (k) { dx += k[0]; dy += k[1]; }
     }
-    const p = pointerRef.current;
-    const style = propsRef.current.style;
-    const focus = style === 'bullets' && (keys.has('ShiftLeft') || keys.has('ShiftRight') || p.pressed);
+    const touch = touchRef.current;
+    const focus = propsRef.current.style === 'bullets' && (keys.has('ShiftLeft') || keys.has('ShiftRight'));
     const dash = dashRef.current;
     dashRef.current = false;
     const facing = facingRef.current;
     facingRef.current = null;
-    let hold = p.pressed || p.touches > 0;
+    let hold = touch.touches > 0;
     for (const code of keys) if (HOLD_KEYS.has(code)) hold = true;
-    return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: p.target, dash, hold, facing };
+    return { dx: Math.sign(dx), dy: Math.sign(dy), focus, target: touch.target, dash, hold, facing };
   };
 
   // Respawn countdown: the song is paused on the checkpoint; the player can already move
@@ -318,7 +428,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         const p = propsRef.current;
         if (p.respawnDelay > 0) {
           // Pause first so the seek lands exactly on the checkpoint, then show it right away
-          p.onTogglePlay();
+          p.onPause();
           p.onSeek(rewind);
           e.step(rewind, 0, NO_INPUT, [], fxRef.current);
           setRespawnUntil(performance.now() + p.respawnDelay * 1000);
@@ -346,55 +456,31 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     },
   }));
 
+  // ---- Touch: the mouse never plays, it's for the song bar ----
   const onPointerMove = (e: React.PointerEvent) => {
-    const p = pointerRef.current;
+    const p = touchRef.current;
+    if (e.pointerType !== 'touch' || !p.offset || !e.isPrimary) return;
     const w = toWorld(e.clientX, e.clientY);
-    if (!w) return;
-    if (e.pointerType === 'mouse') {
-      p.client = [e.clientX, e.clientY];
-      // Browsers report moves for a resting cursor too (sensor jitter, layout changes, bogus
-      // movementX), so the mouse only takes back control once it's clearly been moved
-      if (p.keyboardAt) {
-        if (Number.isNaN(p.keyboardAt[0])) { p.keyboardAt = [e.clientX, e.clientY]; return; }
-        if (Math.hypot(e.clientX - p.keyboardAt[0], e.clientY - p.keyboardAt[1]) < MOUSE_TAKEOVER_PX) return;
-        p.keyboardAt = null;
-      }
-      p.target = w;
-    } else if (p.offset && e.isPrimary) {
-      // Touch steers relative to where the finger went down, so it doesn't cover the player
-      p.target = [w[0] + p.offset[0], w[1] + p.offset[1]];
-    }
+    // Steers relative to where the finger went down, so it doesn't cover the player
+    if (w) p.target = [w[0] + p.offset[0], w[1] + p.offset[1]];
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    const p = pointerRef.current;
-    const eng = propsRef.current.engine;
-    const shapes = propsRef.current.style === 'shapes';
+    if (e.pointerType !== 'touch') return;
+    const p = touchRef.current;
+    const { engine: eng, style } = propsRef.current;
     const w = toWorld(e.clientX, e.clientY);
-    if (e.pointerType === 'mouse') {
-      p.client = [e.clientX, e.clientY];
-      if (e.button === 0) {
-        if (shapes) dashRef.current = true;
-        else p.pressed = true;
-      }
-      // Clicking to dash shouldn't hand steering back to the mouse
-      if (w && !(shapes && p.keyboardAt)) {
-        p.target = w;
-        p.keyboardAt = null;
-      }
-      return;
-    }
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
     p.touches++;
     // The shield turns to wherever a finger is, not relative to where it went down
-    if (propsRef.current.style === 'shield') {
+    if (style === 'shield') {
       if (w) p.target = w;
       if (e.isPrimary) p.offset = [0, 0];
       return;
     }
     // A second finger dashes
     if (!e.isPrimary) {
-      if (shapes) dashRef.current = true;
+      if (style === 'shapes') dashRef.current = true;
       return;
     }
     p.downAt = performance.now();
@@ -405,11 +491,8 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
-    const p = pointerRef.current;
-    if (e.pointerType === 'mouse') {
-      p.pressed = false;
-      return;
-    }
+    if (e.pointerType !== 'touch') return;
+    const p = touchRef.current;
     p.touches = Math.max(0, p.touches - 1);
     if (!e.isPrimary) return;
     // A quick tap dashes too
@@ -418,21 +501,22 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     p.target = null;
   };
 
-  const onPointerLeave = (e: React.PointerEvent) => {
-    if (e.pointerType !== 'mouse') return;
-    pointerRef.current.target = null;
-    pointerRef.current.pressed = false;
+  // The cursor is only there while it's being moved
+  const showCursor = (e: React.PointerEvent) => {
+    const outer = outerRef.current;
+    if (e.pointerType !== 'mouse' || !outer) return;
+    outer.setAttribute('data-cursor', '');
+    clearTimeout(cursorTimerRef.current);
+    cursorTimerRef.current = window.setTimeout(() => outer.removeAttribute('data-cursor'), CURSOR_IDLE_MS);
   };
 
-  const shapes = style === 'shapes';
-  const wave = style === 'wave';
-  const bullets = style === 'bullets';
-  let message: string | null = null;
-  if (!analysis) message = status ?? 'Load a song to play';
-  else if (!isPlaying && !results && !respawning) message = (engine?.position ?? 0) > 0.05 ? 'Paused' : 'Ready';
+  const hasCheckpoints = style !== 'bullets';
+  const live = isPlaying || respawning;
+  const underway = !results && playbackPos > 0.05;
+  const title = !analysis ? status ?? 'Load a song to play' : results ? 'Song complete' : underway ? 'Paused' : 'Ready';
 
   return (
-    <div className={`${styles.outer} ${isPlaying || respawning ? styles.playing : ''}`}>
+    <div ref={outerRef} className={`${styles.outer} ${live ? styles.playing : ''}`} onPointerMove={showCursor}>
       <canvas
         ref={canvasRef}
         className={styles.canvas}
@@ -440,33 +524,28 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         onPointerDown={onPointerDown}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
-        onPointerLeave={onPointerLeave}
+        onWheel={(e) => { if (e.deltaY) stepVolume(e.deltaY < 0 ? 1 : -1); }}
         onContextMenu={(e) => e.preventDefault()}
       />
+      <div className={styles.low} aria-hidden="true" />
 
-      <div className={styles.hud}>
-        {!bullets && (
-          <div className={styles.stat}>
-            <span className={styles.statLabel}>Health</span>
-            <span ref={healthRef} className={`${styles.statValue} ${styles.health}`} />
-          </div>
-        )}
-        <div className={styles.stat}>
-          <span className={styles.statLabel}>Hits</span>
-          <span ref={hitsRef} className={styles.statValue}>0</span>
+      {engine && (
+        <div className={styles.hits}>
+          Hits <span ref={hitsRef}>0</span>
         </div>
-      </div>
+      )}
 
-      {engine?.checkpoints && (
-        <div ref={progressRef} className={styles.progress} aria-hidden="true">
-          <div className={styles.segment} />
-          <div className={styles.fill} />
-          {engine.checkpoints.filter((c) => c > 0).map((c) => (
-            <span key={c} data-at={c} className={styles.checkpoint} style={{ left: `${(100 * c) / engine.duration}%` }} />
-          ))}
-          <span data-at={engine.duration} className={`${styles.checkpoint} ${styles.finish}`} style={{ left: '100%' }} />
-          <div className={styles.head} />
-        </div>
+      {analysis && engine && (
+        <SongBar
+          ref={songBarRef}
+          analysis={analysis}
+          checkpoints={engine.checkpoints ?? NO_CHECKPOINTS}
+          isPlaying={isPlaying}
+          open={!live}
+          onTogglePlay={() => { if (respawning) setRespawnUntil(null); else onTogglePlay(); }}
+          onSeek={seekTo}
+          onScrub={setScrubbing}
+        />
       )}
 
       {respawning && (
@@ -476,123 +555,37 @@ export const Game = forwardRef<GameHandle, GameProps>(({
         </div>
       )}
 
-      {message && (
-        <div
-          className={styles.overlay}
-          onDragOver={!analysis ? (e) => { e.preventDefault(); setFileDragging(true); } : undefined}
-          onDragLeave={!analysis ? () => setFileDragging(false) : undefined}
-          onDrop={!analysis ? (e) => {
-            e.preventDefault();
-            setFileDragging(false);
-            const f = Array.from(e.dataTransfer.files).find((file) => file.type.startsWith('audio/'));
-            if (f) onLoadFile(f);
-          } : undefined}
-        >
-          <div
-            className={`${styles.card} ${!analysis ? styles.pickerCard : ''} ${fileDragging ? styles.cardDragging : ''}`}
-            onClick={!analysis ? () => fileInputRef.current?.click() : undefined}
-            onKeyDown={!analysis ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                fileInputRef.current?.click();
-              }
-            } : undefined}
-            role={!analysis ? 'button' : undefined}
-            tabIndex={!analysis ? 0 : undefined}
-            aria-label={!analysis ? 'Load a song' : undefined}
-          >
-            <div className={styles.title}>
-              <span>{message}</span>
-              {!analysis && <IconUpload />}
-            </div>
-            {!analysis && (
-              <>
-                <div className={styles.help}>
-                  <span>or drop an audio file anywhere here</span>
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="audio/*"
-                  style={{ display: 'none' }}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) {
-                      onLoadFile(f);
-                      e.target.value = '';
-                    }
-                  }}
-                />
-              </>
-            )}
-            {analysis && (
-              <>
-                {message === 'Ready' && (
-                  <div className={styles.segmented} role="group" aria-label="Game style">
-                    {STYLE_OPTIONS.map((o) => (
-                      <button
-                        key={o.value}
-                        className={`${styles.segBtn} ${style === o.value ? styles.segBtnActive : ''}`}
-                        aria-pressed={style === o.value}
-                        onClick={() => onStyleChange(o.value)}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                <button className={styles.primaryBtn} onClick={onTogglePlay}>
-                  {message === 'Paused' ? 'Resume' : 'Start'}
-                </button>
-                {style === 'shield' ? (
-                  <div className={styles.help}>
-                    <span><kbd>WASD</kbd> / <kbd>Arrows</kbd> / <kbd>Mouse</kbd> turn the shield</span>
-                    <span>Touch: press on the side to block</span>
-                    <span><kbd>Space</kbd> / <kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>You can't move. Spears land on the beat: face them when they arrive. Amber ones fly in backwards, then jump to the opposite side: block where they point. Big red ones hit hard, long ones last as long as the note. Run out of health and the song rewinds to the last checkpoint.</span>
-                  </div>
-                ) : wave ? (
-                  <div className={styles.help}>
-                    <span>Hold <kbd>Space</kbd> / <kbd>W</kbd> / <kbd>Up</kbd> / click to fly up, let go to fly down</span>
-                    <span>Touch: hold anywhere</span>
-                    <span><kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>The level turns on the beat. Stay between the walls. Run out of health and the song rewinds to the last checkpoint.</span>
-                  </div>
-                ) : shapes ? (
-                  <div className={styles.help}>
-                    <span><kbd>Mouse</kbd> / <kbd>WASD</kbd> / <kbd>Arrows</kbd> move</span>
-                    <span><kbd>Space</kbd> / <kbd>Shift</kbd> / <kbd>X</kbd> / click: dash (invulnerable while dashing)</span>
-                    <span>Touch: drag to move, tap or second finger to dash</span>
-                    <span><kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>Faint shapes turn solid on the beat. Run out of health and the song rewinds to the last checkpoint.</span>
-                  </div>
-                ) : (
-                  <div className={styles.help}>
-                    <span><kbd>Mouse</kbd> / <kbd>WASD</kbd> / <kbd>Arrows</kbd> move</span>
-                    <span><kbd>Shift</kbd> or hold click: slow, precise movement</span>
-                    <span>Touch: drag anywhere</span>
-                    <span><kbd>Space</kbd> / <kbd>Esc</kbd> / <kbd>P</kbd> pause</span>
-                    <span>Dodge everything. Only the white dot is your hitbox.</span>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        </div>
+      {/* Out of the way while the playhead is dragged, to see where it goes */}
+      {!live && !scrubbing && (
+        <GameMenu
+          title={title}
+          trackName={trackName}
+          loaded={!!analysis}
+          busy={status !== null && !failed}
+          primary={results ? 'Play again' : underway ? 'Resume' : 'Start'}
+          underway={underway}
+          hasCheckpoints={hasCheckpoints}
+          results={results}
+          style={style}
+          difficulty={difficulty}
+          volume={volume}
+          showVisualizer={showVisualizer}
+          onPrimary={onTogglePlay}
+          onRestart={() => restart(0)}
+          onCheckpoint={() => restart(lastCheckpoint(engine?.position ?? 0))}
+          onStyleChange={onStyleChange}
+          onDifficultyChange={onDifficultyChange}
+          onVolume={onVolume}
+          onToggleMute={toggleMute}
+          onLoadFile={onLoadFile}
+          onToggleVisualizer={onToggleVisualizer}
+          onFullscreen={toggleFullscreen}
+          onOpenSettings={onOpenSettings}
+          onLeave={onLeave}
+        />
       )}
 
-      {results && (
-        <div className={styles.overlay}>
-          <div className={styles.card}>
-            <div className={styles.title}>Song complete</div>
-            <div className={styles.resultRows}>
-              <span>Hits taken</span><span>{results.hits}</span>
-              {!bullets && <><span>Rewinds</span><span>{results.deaths}</span></>}
-            </div>
-            <button className={styles.primaryBtn} onClick={onRestart}>Play again</button>
-          </div>
-        </div>
-      )}
+      {toast && <div className={styles.toast} role="status">{toast}</div>}
     </div>
   );
 });

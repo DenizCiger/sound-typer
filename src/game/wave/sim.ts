@@ -1,5 +1,5 @@
 import type { TrackAnalysis } from '../../audio/analysis';
-import { intensityAt, sample } from '../common';
+import { intensityAt, sample, SEEK_GRACE } from '../common';
 import { newStats, type GameInput, type RunStats } from '../types';
 import { lowerBound, MINI_R, PLAYER_R, sampleAt, sectionAt, type WaveChart } from './chart';
 
@@ -52,6 +52,13 @@ export class WaveSim {
     this.expectRewind = null;
     this.snap(0);
     this.player.invuln = 0;
+  }
+
+  jump() {
+    this.lastPos = -1;
+    this.pendingRewind = null;
+    this.expectRewind = null;
+    this.hp = this.chart.maxHp;
   }
 
   levelAt(t: number) {
@@ -112,7 +119,7 @@ export class WaveSim {
       } else if (jumped && pos < 0.1) {
         this.reset();
       } else if (jumped || pos > 0.5) {
-        this.player.invuln = Math.max(this.player.invuln, 0.5);
+        this.player.invuln = Math.max(this.player.invuln, SEEK_GRACE);
       }
       this.snap(pos);
       this.lastPos = pos;

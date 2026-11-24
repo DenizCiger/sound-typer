@@ -1,6 +1,6 @@
 # Sound Typer
 
-Plays an audio file and types text in sync with the music. Louder = faster typing, and hits (drums, a vocal kicking in, anything sudden) slam chunks of text in and shake the screen.
+Turns an audio file into a rhythm game, or types text in sync with it. In the typewriter, louder = faster typing, and hits (drums, a vocal kicking in, anything sudden) slam chunks of text in and shake the screen.
 
 ## Install
 
@@ -13,39 +13,41 @@ bun run dev
 
 ## Usage
 
-1. Drag and drop an audio file onto the app or use the file button (top left) to select one
-2. Hit play
-3. Watch the text get typed out at a pace driven by the audio
+1. Drag and drop an audio file anywhere onto the app, or choose one in the menu
+2. Pick a style and difficulty and start
+3. For the typewriter, switch over with **Typewriter** in the menu (and back with **Game** in its toolbar)
 
 ### Game mode
 
-Switch the toolbar toggle from **Type** to **Game** for a rhythm game generated from the song. Pick a style on the start screen (or in Settings):
+A rhythm game generated from the song, played with the keyboard (or touch). **Esc** pauses and opens the menu, where style and difficulty can be changed at any time; the song goes on from the same place. The bar at the top is the song: click or drag to jump around in it, it snaps to checkpoints. **,** and **.** step through the checkpoints (10 s in Bullet hell), **1**–**4** pick the style while paused, the mouse wheel or **-** / **+** / **M** set the volume, **F** goes fullscreen. Leaving the window pauses. Your health is right at the player, and the screen's edges glow red on the last one (both can be turned off in Settings).
+
+The styles:
 
 **Bullet hell** — emitters charge up and fire on the beat: bass hits throw out rings, crisp hits fire aimed spreads, the biggest hits get a warned laser, and loud sections fill the screen with spirals.
 
-- **Move** — mouse, WASD or arrow keys; on touch, drag anywhere (the ship moves relative to your finger)
-- **Focus** — hold Shift or the mouse button for slow, precise movement
+- **Move** — WASD or arrow keys; on touch, drag anywhere (the ship moves relative to your finger)
+- **Focus** — hold Shift for slow, precise movement
 - **Space**, **Esc** or **P** — pause / resume
 - Only the white dot is your hitbox. Grazing bullets scores extra. Getting hit clears nearby bullets; there's no game over.
 
 **Shapes** (Just Shapes & Beats style) — faint pink shapes warn where something is about to land, then turn solid exactly on the beat. Mostly bars: full rows and columns slamming down (some aimed at where you're standing), bars marching across the arena one lane per beat, walls sweeping through with a gap, and beams spinning around a drifting pivot, speeding up with the music and firing bursts of rays on the big hits. In between: circles and boxes popping up on the beat, trails of small bombs stepping across the arena, rows of shots flying in from an edge, and the occasional small bomb that lands where you were standing. Every warning lasts long enough to walk out of the way, so you never *have* to dash. Like the typewriter, it follows the music's intensity: quiet passages thin out and the background crawls; loud ones fill up, the background streaks rush past, and strong hits punch the camera in and thump the arena.
 
-- **Move** — mouse, WASD or arrow keys; on touch, drag anywhere
-- **Dash** — Space, Shift, X or click (on touch: a quick tap or a second finger). You're invulnerable while dashing, so you can dash *through* shapes, which scores extra
+- **Move** — WASD or arrow keys; on touch, drag anywhere
+- **Dash** — Space, Shift or X (on touch: a quick tap or a second finger). You're invulnerable while dashing, so you can dash *through* shapes, which scores extra
 - **Esc** or **P** — pause
 - You have a few health pips (more on Easy). Run out and the song rewinds to the last checkpoint (about every 30 s)
 - Dashes need to recharge (a ring around you fills back up), longer on harder difficulties
 
 **Wave** (Geometry Dash wave style) — hold to fly up at a steep diagonal, let go to fly down, while the level scrolls by. The level is laid around a path that turns on the music's hits, so you click and release on the beat. Tight tunnels zigzag along it, spiked corridors have saws on the outside of the turns, block columns leave a gap where the path passes, mini sections make the wave smaller and twice as steep, and spam sections turn on every hit. Speed follows the song: it changes only where the music does (a drop, a breakdown, a build), across six speed stages from the calmest parts to the most intense, and the wave goes mini for the busiest drops. Changes are marked by portals, a FASTER/SLOWER callout and a color change (cool when slow, hot when fast; the meter in the corner shows the current stage). Orbs on the turns score extra.
 
-- **Fly up** — hold Space, W, Up or the mouse button (on touch: hold anywhere)
+- **Fly up** — hold Space, W or Up (on touch: hold anywhere)
 - **Esc** or **P** — pause
 - Health and checkpoints work like in Shapes; after a hit you're put back on the path
 - Plain floors and ceilings are safe to slide along, spiked ones aren't
 
 **Shield** — you can't move, only turn a shield to face up, right, down or left. Spears fly in from the four sides and land exactly on the music's notes, so blocking them plays the song. Every stretch of the song gets a dance from what it sounds like: kicks on one side and snares on the other, a march turning with each beat, stomps answered from the opposite side, streams of hats, a spin rising through a build. Bars that sound alike play alike and a refrain comes back identical, so you learn the song as you go. Blunt spears are kicks, thin darts are hats. When the music stops dead the spears hang in the air until it returns, a build squeezes the border in and the drop bursts it open. Big red spears are the heavy hits: they come in much faster and land with a blast. Amber ones fly in backwards, then jump to the opposite side just before they land (not on Easy), so block the side they point away from. Speed follows the song, like in Wave: at each big change in the music the spears speed up or slow down, the diamond border and camera open up or close in, and the colour changes with a FASTER/SLOWER callout. Long teal lances on loud held notes have to be blocked for as long as the note lasts.
 
-- **Turn** — WASD, arrows or the mouse (on touch: press on the side to block)
+- **Turn** — WASD or arrows (on touch: press on the side to block)
 - **Space**, **Esc** or **P** — pause
 - Health and checkpoints work like in Shapes
 
@@ -63,11 +65,11 @@ Because the whole track is known in advance, playback just looks up features at 
 ### Customization
 
 - **Text source** — swap out the default text with your own via the text source button (top right)
-- **Volume** — in the toolbar (hidden on phones; use the hardware buttons)
+- **Volume** — in the toolbar or the game's menu (hidden on phones; use the hardware buttons)
 - **Visualizer** — spectrum on top; below it a timeline of the typing intensity and detected hits (bright ones shake), including a look-ahead past the playhead
-- **Settings** (gear icon):
+- **Settings** (gear icon, shows what the current mode uses):
   - **Typing** — Speed (characters per second at full volume), Dynamics (higher = quiet parts slower, loud parts stand out), Punch (how hard hits slam text in), Hits complete words, Whitespace handling
-  - **Game** — Style (Bullet hell / Shapes / Wave / Shield), Difficulty (Easy / Normal / Hard: density, speed, warning time, timing window, health)
+  - **Game** — Respawn timer, show health, invincible (style and difficulty are in the menu)
   - **Effects** — Screen shake on/off, shake strength and threshold, glow on hits (0 = off, up to 3x)
   - **Layout** — Text anchor (bottom or center), text width (ignored on phones)
   - **Reset to defaults**

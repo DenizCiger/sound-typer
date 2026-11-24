@@ -1,5 +1,5 @@
 import type { Hit } from '../../audio/driver';
-import { prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
+import { HealthPips, prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
 import type { EffectSettings } from '../types';
 import { SPEED_STAGES } from '../wave/chart';
 import { STAGE_COLORS } from '../wave/render';
@@ -93,6 +93,7 @@ interface Particle { x: number; y: number; vx: number; vy: number; life: number;
 export class ShieldRenderer {
   private particles: Particle[] = [];
   private shake = new Shake();
+  private pips = new HealthPips();
   private blockFlash = 0;
   private blockColor = INK;
   private hurtFlash = 0;
@@ -129,6 +130,7 @@ export class ShieldRenderer {
   reset() {
     this.particles = [];
     this.shake = new Shake();
+    this.pips.reset();
     this.blockFlash = 0;
     this.hurtFlash = 0;
     this.screenFlash = 0;
@@ -264,6 +266,7 @@ export class ShieldRenderer {
       if (this.blast.left <= 0) this.blast = null;
     }
     this.shake.step(dt);
+    this.pips.update(sim.hp, dt);
     for (const p of this.particles) {
       p.x += p.vx * dt;
       p.y += p.vy * dt;
@@ -282,7 +285,7 @@ export class ShieldRenderer {
     return Math.floor(((t - beats[a - 1]) / (beats[a] - beats[a - 1])) * 4);
   }
 
-  draw(canvas: HTMLCanvasElement, sim: ShieldSim) {
+  draw(canvas: HTMLCanvasElement, sim: ShieldSim, fx: EffectSettings) {
     const prep = prepareCanvas(canvas);
     if (!prep) return;
     const { ctx, w, h, dpr } = prep;
@@ -397,6 +400,11 @@ export class ShieldRenderer {
       ctx.fillStyle = `rgb(${this.hurtFlash > 0.1 ? HEAVY : INK})`;
       for (let y = -r; y <= r; y++) ctx.fillRect(Math.abs(y) - r, y, 2 * (r - Math.abs(y)) + 1, 1);
     }
+
+    // Health, between the core and the shield
+    place(0);
+    const { maxHp } = sim.chart;
+    if (fx.showHealth) this.pips.draw(ctx, ((maxHp * 3 - 1) % 2) / 2, 9, sim.hp, maxHp, 2, 1, INK, 1);
 
     // The shield: holding a lance keeps it in the lance's colour
     const color = this.hurtFlash > 0.2 ? HEAVY : this.holding ? LANCE : this.blockFlash > 0.15 ? this.blockColor : INK;
