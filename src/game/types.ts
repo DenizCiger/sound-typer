@@ -1,4 +1,5 @@
 import type { Hit } from '../audio/driver';
+import type { LyricLine } from '../audio/lyrics';
 
 export type GameStyle = 'bullets' | 'shapes' | 'wave' | 'shield';
 
@@ -37,6 +38,8 @@ export interface EffectSettings {
   partColors: boolean;
   /** Draw the health at the player. */
   showHealth: boolean;
+  /** The song's timed lyrics to show behind the game, null for none. */
+  lyrics: LyricLine[] | null;
   /** Focus held: draw the hitbox brighter. */
   focus: boolean;
 }

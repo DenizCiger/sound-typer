@@ -18,6 +18,8 @@ export interface SettingsState {
   partColors: boolean;
   /** Game mode: health shown at the player. */
   showHealth: boolean;
+  /** Game mode: the line being sung behind the game, for songs with timed lyrics. */
+  showLyrics: boolean;
   snapToWords: boolean;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
@@ -56,6 +58,8 @@ const WHITESPACE_OPTIONS: { value: WhitespaceMode; label: string }[] = [
 interface Props {
   settings: SettingsState;
   feel: FeelPrefs;
+  /** The loaded song has no timed lyrics to show. */
+  noLyrics: boolean;
   onChange: (s: SettingsState) => void;
   onFeelChange: (f: FeelPrefs) => void;
   onReset: () => void;
@@ -105,7 +109,7 @@ function SliderRow({ label, hint, min, max, step, value, format, onChange }: Sli
 const formatPercent = (v: number) => `${Math.round(v * 100)}%`;
 const formatMultiplier = (v: number) => `${v}x`;
 
-export function Settings({ settings, feel, onChange, onFeelChange, onReset, onClose }: Props) {
+export function Settings({ settings, feel, noLyrics, onChange, onFeelChange, onReset, onClose }: Props) {
   const game = settings.mode === 'play';
   const trackRef = useRef<HTMLDivElement>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
@@ -325,6 +329,18 @@ export function Settings({ settings, feel, onChange, onFeelChange, onReset, onCl
             onClick={() => onChange({ ...settings, partColors: !settings.partColors })}
             aria-pressed={settings.partColors}
             aria-label="Part colours"
+          />
+        </div>
+        <div className={styles.row}>
+          <div className={styles.labelGroup}>
+            <span className={styles.label}>Lyrics</span>
+            <span className={styles.hint}>{noLyrics ? 'This song has no timed lyrics' : 'Behind the game, if the song has timed lyrics'}</span>
+          </div>
+          <button
+            className={`${styles.toggle} ${settings.showLyrics ? styles.toggleOn : ''}`}
+            onClick={() => onChange({ ...settings, showLyrics: !settings.showLyrics })}
+            aria-pressed={settings.showLyrics}
+            aria-label="Lyrics"
           />
         </div>
         </>}

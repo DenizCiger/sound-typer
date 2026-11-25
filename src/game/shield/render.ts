@@ -1,5 +1,6 @@
 import type { Hit } from '../../audio/driver';
 import { HealthPips, prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
+import { drawLyrics } from '../lyrics';
 import type { EffectSettings } from '../types';
 import { SPEED_STAGES } from '../wave/chart';
 import { STAGE_COLORS } from '../wave/render';
@@ -334,6 +335,9 @@ export class ShieldRenderer {
       if (d < near) continue;
       ctx.fillRect(Math.round(Math.cos(a) * d), Math.round(Math.sin(a) * d), 1, 1);
     }
+
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawLyrics(ctx, w, h, fx.lyrics, t, { font: 'monospace', color: INK, alpha: 0.2, y: 0.86, height: 0.2 });
 
     // What's in view lands within the longest lead of now (a heavy flies faster, so it may come
     // into view after a spear that lands before it)

@@ -1,5 +1,6 @@
 import type { Hit } from '../../audio/driver';
 import { prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
+import { drawLyrics } from '../lyrics';
 import type { EffectSettings } from '../types';
 import { GRAZE_RADIUS, PLAYER_RADIUS, type GameSim, type StepResult } from './sim';
 
@@ -139,6 +140,9 @@ export class GameRenderer {
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, w, h);
     ctx.translate(this.shake.x, this.shake.y);
+    drawLyrics(ctx, w, h, fx.lyrics, pos, {
+      font: 'Inter, system-ui, sans-serif', color: '255, 255, 255', alpha: 0.11, scale: 1 + 0.03 * Math.min(1, this.pulse),
+    });
     // The camera always shows exactly the play area, which grows and shrinks with the music
     const z = 1 / sim.scale;
     ctx.translate(w / 2, h / 2);

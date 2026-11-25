@@ -1,5 +1,6 @@
 import type { Hit } from '../../audio/driver';
 import { HealthPips, prepareCanvas, Shake, SHAKE_MAX_PX } from '../common';
+import { drawLyrics } from '../lyrics';
 import type { EffectSettings } from '../types';
 import { ARENA_H, indexAtX, lowerBound, sectionAt, SPEED_STAGES, type WaveChart } from './chart';
 import type { WaveSim, WaveStep } from './sim';
@@ -283,6 +284,9 @@ export class WaveRenderer {
     const edge = 2 + 2 * this.pulse;
     this.drawWall(ctx, chart, chart.top, i0, i1, -1, sx, sy, col, edge, top - 20);
     this.drawWall(ctx, chart, chart.bot, i0, i1, 1, sx, sy, col, edge, bottom + 20);
+
+    // Over the walls, which fill most of the view; faint enough to leave their edges clear
+    drawLyrics(ctx, w, h, fx.lyrics, sim.position, { font: 'Inter, system-ui, sans-serif', color: INK, alpha: 0.1, scale: 1 + 0.03 * this.pulse });
 
     for (const b of chart.blocks) {
       if (b.x1 < left || b.x0 > right) continue;

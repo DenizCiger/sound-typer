@@ -1,5 +1,6 @@
 import type { Hit } from '../../audio/driver';
 import { HealthPips, prepareCanvas, sectionIndexAt, Shake, SHAKE_MAX_PX } from '../common';
+import { drawLyrics } from '../lyrics';
 import type { EffectSettings } from '../types';
 import { geometry, lastKick, lastPulse, playArea, type Geo, type Hazard } from './chart';
 import { PLAYER_SIZE, type ShapesSim, type ShapesStep } from './sim';
@@ -316,6 +317,10 @@ export class ShapesRenderer {
       ctx.strokeRect(-s, -s, s * 2, s * 2);
     }
     ctx.restore();
+
+    drawLyrics(ctx, w, h, fx.lyrics, sim.position, {
+      font: 'Inter, system-ui, sans-serif', color: '255, 255, 255', alpha: 0.14, scale: 1 + 0.03 * this.pulse,
+    });
 
     // The background dims while the music rests, so the frozen hazards stand out
     if (this.still > 0.01) {

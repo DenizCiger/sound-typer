@@ -6,6 +6,7 @@ import { useAudioEngine } from './hooks/useAudioEngine';
 import { useAnimationLoop } from './hooks/useAnimationLoop';
 import { analyzeBuffer } from './audio/analyzeBuffer';
 import type { TrackAnalysis } from './audio/analysis';
+import { readLyrics, type LyricLine } from './audio/lyrics';
 import { TypingDriver, type DriverFrame, type DriverParams } from './audio/driver';
 import type { Session } from './components/Stage';
 import { Visualizer, type VisualizerHandle } from './components/Visualizer';
@@ -19,7 +20,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, partColors: true, showHealth: true, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'play', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5, invincible: false };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, partColors: true, showHealth: true, showLyrics: false, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'play', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5, invincible: false };
 
 interface Prefs extends FeelPrefs {
   volume: number;
@@ -87,6 +88,7 @@ export default function App() {
   const [status, setStatus] = useState<string | null>(null);
   const [duration, setDuration] = useState(0);
   const [analysis, setAnalysis] = useState<TrackAnalysis | null>(null);
+  const [lyrics, setLyrics] = useState<LyricLine[] | null>(null);
   const [playbackPos, setPlaybackPos] = useState(0);
   const [textSource, setTextSourceState] = useState<string | null>(savedTextSource);
   const [textSourceName, setTextSourceName] = useState<string | null>(savedTextSource ? 'Custom' : null);
@@ -128,9 +130,11 @@ export default function App() {
     setIsPlaying(false);
     driverRef.current = null;
     setAnalysis(null);
+    setLyrics(null);
     setTrackName(file.name);
     setStatus('Decoding…');
     setLoadFailed(false);
+    readLyrics(file).then((l) => { if (loadId === loadIdRef.current) setLyrics(l); });
     try {
       const buffer = await engine.load(file);
       if (loadId !== loadIdRef.current) return;
@@ -331,6 +335,7 @@ export default function App() {
             cameraZoom={settings.cameraZoom}
             partColors={settings.partColors}
             showHealth={settings.showHealth}
+            lyrics={settings.showLyrics ? lyrics : null}
           />
         </>
       ) : (
@@ -354,6 +359,7 @@ export default function App() {
         <Settings
           settings={settings}
           feel={prefs}
+          noLyrics={!!analysis && !lyrics}
           onChange={handleSettingsChange}
           onFeelChange={handleFeelChange}
           onReset={handleReset}

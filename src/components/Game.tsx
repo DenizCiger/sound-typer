@@ -1,6 +1,7 @@
 import { useRef, useImperativeHandle, forwardRef, useEffect, useMemo, useState } from 'react';
 import type { TrackAnalysis } from '../audio/analysis';
 import { TypingDriver, type DriverParams } from '../audio/driver';
+import type { LyricLine } from '../audio/lyrics';
 import type { Difficulty } from '../game/common';
 import type { EffectSettings, GameEngine, GameInput, GameStyle } from '../game/types';
 import { BulletGame } from '../game/bullets';
@@ -34,6 +35,8 @@ interface GameProps {
   partColors: boolean;
   /** Health pips at the player and the glow on the last one. */
   showHealth: boolean;
+  /** Lyrics to show behind the game, null for none. */
+  lyrics: LyricLine[] | null;
 }
 
 interface Results {
@@ -66,7 +69,7 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  session, style, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth,
+  session, style, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics,
 }, ref) => {
   const { analysis, isPlaying, difficulty, getPosition, onTogglePlay, onPause, onSeek } = session;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -103,10 +106,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   if (isPlaying && respawnUntil !== null) setRespawnUntil(null);
   const respawning = respawnUntil !== null;
 
-  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, focus: false });
+  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics, focus: false });
   const propsRef = useRef({ engine, style, respawnDelay, invincible, isPlaying, respawning, getPosition, onTogglePlay, onPause, onSeek });
   useEffect(() => {
-    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth };
+    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics };
     propsRef.current = { engine, style, respawnDelay, invincible, isPlaying, respawning, getPosition, onTogglePlay, onPause, onSeek };
   });
 
@@ -225,7 +228,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     if (propsRef.current.isPlaying) return;
     redraw();
     updateHud();
-  }, [glowIntensity, cameraZoom, partColors, showHealth]);
+  }, [glowIntensity, cameraZoom, partColors, showHealth, lyrics]);
 
   const readInput = (): GameInput => {
     const keys = keysRef.current;
