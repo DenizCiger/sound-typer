@@ -35,8 +35,10 @@ interface GameProps {
   partColors: boolean;
   /** Health pips at the player and the glow on the last one. */
   showHealth: boolean;
-  /** Lyrics to show behind the game, null for none. */
+  /** The song's timed lyrics, null if it has none. */
   lyrics: LyricLine[] | null;
+  /** 0 to 1; 0 hides them. */
+  lyricsOpacity: number;
 }
 
 interface Results {
@@ -69,7 +71,7 @@ function createEngine(style: GameStyle, analysis: TrackAnalysis, difficulty: Dif
 }
 
 export const Game = forwardRef<GameHandle, GameProps>(({
-  session, style, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics,
+  session, style, respawnDelay, invincible, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics, lyricsOpacity,
 }, ref) => {
   const { analysis, isPlaying, difficulty, getPosition, onTogglePlay, onPause, onSeek } = session;
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -106,10 +108,10 @@ export const Game = forwardRef<GameHandle, GameProps>(({
   if (isPlaying && respawnUntil !== null) setRespawnUntil(null);
   const respawning = respawnUntil !== null;
 
-  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics, focus: false });
+  const fxRef = useRef<EffectSettings>({ screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics, lyricsOpacity, focus: false });
   const propsRef = useRef({ engine, style, respawnDelay, invincible, isPlaying, respawning, getPosition, onTogglePlay, onPause, onSeek });
   useEffect(() => {
-    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics };
+    fxRef.current = { ...fxRef.current, screenshake, screenshakeMultiplier, shakeThreshold, glowIntensity, cameraZoom, partColors, showHealth, lyrics, lyricsOpacity };
     propsRef.current = { engine, style, respawnDelay, invincible, isPlaying, respawning, getPosition, onTogglePlay, onPause, onSeek };
   });
 
@@ -228,7 +230,7 @@ export const Game = forwardRef<GameHandle, GameProps>(({
     if (propsRef.current.isPlaying) return;
     redraw();
     updateHud();
-  }, [glowIntensity, cameraZoom, partColors, showHealth, lyrics]);
+  }, [glowIntensity, cameraZoom, partColors, showHealth, lyrics, lyricsOpacity]);
 
   const readInput = (): GameInput => {
     const keys = keysRef.current;

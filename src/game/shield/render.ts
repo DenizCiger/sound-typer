@@ -337,7 +337,7 @@ export class ShieldRenderer {
     }
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawLyrics(ctx, w, h, fx.lyrics, t, { font: 'monospace', color: INK, alpha: 0.2, y: 0.86, height: 0.2 });
+    drawLyrics(ctx, w, h, fx, t, { font: 'monospace', color: INK, y: 0.86, height: 0.2 });
 
     // What's in view lands within the longest lead of now (a heavy flies faster, so it may come
     // into view after a spear that lands before it)

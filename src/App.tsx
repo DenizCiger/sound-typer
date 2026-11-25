@@ -20,7 +20,7 @@ const STORAGE_KEY = 'sound-typer-prefs';
 const TEXT_SOURCE_KEY = 'sound-typer-text-source';
 const SETTINGS_KEY = 'sound-typer-settings';
 
-const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, partColors: true, showHealth: true, showLyrics: false, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'play', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5, invincible: false };
+const DEFAULT_SETTINGS: SettingsState = { screenshake: true, screenshakeMultiplier: 1, glowIntensity: 1, cameraZoom: 1, partColors: true, showHealth: true, lyricsOpacity: 0, snapToWords: true, cursorPosition: 'bottom', textWidth: 'full', whitespaceMode: 'none', mode: 'play', difficulty: 'normal', gameStyle: 'bullets', respawnDelay: 1.5, invincible: false };
 
 interface Prefs extends FeelPrefs {
   volume: number;
@@ -41,6 +41,11 @@ function loadSettings(): SettingsState {
       parsed.glowIntensity = parsed.hitGlow ? DEFAULT_SETTINGS.glowIntensity : 0;
     }
     delete parsed.hitGlow;
+    // ...and an on/off lyrics toggle
+    if (typeof parsed.showLyrics === 'boolean' && parsed.lyricsOpacity === undefined) {
+      parsed.lyricsOpacity = parsed.showLyrics ? 0.15 : 0;
+    }
+    delete parsed.showLyrics;
     return { ...DEFAULT_SETTINGS, ...parsed };
   } catch { return DEFAULT_SETTINGS; }
 }
@@ -335,7 +340,8 @@ export default function App() {
             cameraZoom={settings.cameraZoom}
             partColors={settings.partColors}
             showHealth={settings.showHealth}
-            lyrics={settings.showLyrics ? lyrics : null}
+            lyrics={lyrics}
+            lyricsOpacity={settings.lyricsOpacity}
           />
         </>
       ) : (

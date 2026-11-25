@@ -140,8 +140,8 @@ export class GameRenderer {
     ctx.fillStyle = BG;
     ctx.fillRect(0, 0, w, h);
     ctx.translate(this.shake.x, this.shake.y);
-    drawLyrics(ctx, w, h, fx.lyrics, pos, {
-      font: 'Inter, system-ui, sans-serif', color: '255, 255, 255', alpha: 0.11, scale: 1 + 0.03 * Math.min(1, this.pulse),
+    drawLyrics(ctx, w, h, fx, pos, {
+      font: 'Inter, system-ui, sans-serif', color: '255, 255, 255', scale: 1 + 0.03 * Math.min(1, this.pulse),
     });
     // The camera always shows exactly the play area, which grows and shrinks with the music
     const z = 1 / sim.scale;

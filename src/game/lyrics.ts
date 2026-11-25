@@ -1,4 +1,5 @@
-import { lyricIndexAt, type LyricLine } from '../audio/lyrics';
+import { lyricIndexAt } from '../audio/lyrics';
+import type { EffectSettings } from './types';
 
 /** How a style draws its lyrics. */
 export interface LyricLook {
@@ -6,7 +7,6 @@ export interface LyricLook {
   font: string;
   /** "r, g, b" */
   color: string;
-  alpha: number;
   /** Middle of the text, as a share of the screen's height. */
   y?: number;
   /** Most of the screen's height the text takes. */
@@ -70,13 +70,14 @@ function balance(words: string[], n: number, measure: (s: string) => number) {
  * The line being sung at t, big behind the game, in screen coordinates of the current transform.
  * A pure function of song time, so seeks and rewinds need nothing.
  */
-export function drawLyrics(ctx: CanvasRenderingContext2D, w: number, h: number, lines: LyricLine[] | null, t: number, look: LyricLook) {
+export function drawLyrics(ctx: CanvasRenderingContext2D, w: number, h: number, fx: EffectSettings, t: number, look: LyricLook) {
+  const lines = fx.lyricsOpacity > 0 ? fx.lyrics : null;
   const i = lines ? lyricIndexAt(lines, t) : -1;
   if (!lines || i < 0) return;
   const { start, end, text } = lines[i];
   // Short lines fade faster, so they're still there for most of their time
   const fade = Math.min(1, (end - start) / (2 * (FADE_IN + FADE_OUT)));
-  const alpha = look.alpha * Math.min(1, (t - start) / (FADE_IN * fade), (end - t) / (FADE_OUT * fade));
+  const alpha = fx.lyricsOpacity * Math.min(1, (t - start) / (FADE_IN * fade), (end - t) / (FADE_OUT * fade));
   if (alpha < 0.004) return;
   const { rows, size } = layOut(ctx, text, look.font, w * WIDTH, h * (look.height ?? 0.5), Math.min(w, h) * MAX_SIZE);
   ctx.save();

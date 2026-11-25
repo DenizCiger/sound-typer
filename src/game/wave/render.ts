@@ -282,11 +282,14 @@ export class WaveRenderer {
     const i0 = Math.max(0, indexAtX(chart.xs, left) - 2);
     const i1 = Math.min(chart.xs.length - 1, indexAtX(chart.xs, right) + 2);
     const edge = 2 + 2 * this.pulse;
-    this.drawWall(ctx, chart, chart.top, i0, i1, -1, sx, sy, col, edge, top - 20);
-    this.drawWall(ctx, chart, chart.bot, i0, i1, 1, sx, sy, col, edge, bottom + 20);
-
-    // Over the walls, which fill most of the view; faint enough to leave their edges clear
-    drawLyrics(ctx, w, h, fx.lyrics, sim.position, { font: 'Inter, system-ui, sans-serif', color: INK, alpha: 0.1, scale: 1 + 0.03 * this.pulse });
+    const ceiling = this.wallPoints(chart, chart.top, i0, i1, -1, sx, sy);
+    const floor = this.wallPoints(chart, chart.bot, i0, i1, 1, sx, sy);
+    this.fillWall(ctx, ceiling, sy(top - 20));
+    this.fillWall(ctx, floor, sy(bottom + 20));
+    // Over the walls, which fill most of the view, but under their edges
+    drawLyrics(ctx, w, h, fx, sim.position, { font: 'Inter, system-ui, sans-serif', color: INK, scale: 1 + 0.03 * this.pulse });
+    this.strokeWall(ctx, ceiling, col, edge);
+    this.strokeWall(ctx, floor, col, edge);
 
     for (const b of chart.blocks) {
       if (b.x1 < left || b.x0 > right) continue;
@@ -421,12 +424,12 @@ export class WaveRenderer {
   }
 
   /**
-   * One wall: `side` -1 is the ceiling (solid above the edge), 1 the floor. Loose sections draw
+   * One wall's edge: `side` -1 is the ceiling (solid above it), 1 the floor. Loose sections draw
    * their edge as spikes whose tips are the collision line.
    */
-  private drawWall(
-    ctx: CanvasRenderingContext2D, chart: WaveChart, edge: Float32Array, i0: number, i1: number, side: number,
-    sx: (x: number) => number, sy: (y: number) => number, col: string, lineWidth: number, far: number,
+  private wallPoints(
+    chart: WaveChart, edge: Float32Array, i0: number, i1: number, side: number,
+    sx: (x: number) => number, sy: (y: number) => number,
   ) {
     const arc = this.arcLength(chart, edge);
     const pts: [number, number][] = [];
@@ -451,14 +454,22 @@ export class WaveRenderer {
         at((k * (SPIKE / 2) - arc[i]) / Math.max(1e-6, arc[i + 1] - arc[i]));
       }
     }
+    return pts;
+  }
+
+  private fillWall(ctx: CanvasRenderingContext2D, pts: [number, number][], farY: number) {
     if (pts.length < 2) return;
     ctx.beginPath();
-    ctx.moveTo(pts[0][0], sy(far));
+    ctx.moveTo(pts[0][0], farY);
     for (const [x, y] of pts) ctx.lineTo(x, y);
-    ctx.lineTo(pts[pts.length - 1][0], sy(far));
+    ctx.lineTo(pts[pts.length - 1][0], farY);
     ctx.closePath();
     ctx.fillStyle = SOLID;
     ctx.fill();
+  }
+
+  private strokeWall(ctx: CanvasRenderingContext2D, pts: [number, number][], col: string, lineWidth: number) {
+    if (pts.length < 2) return;
     ctx.beginPath();
     pts.forEach(([x, y], j) => (j ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
     ctx.strokeStyle = `rgb(${col})`;

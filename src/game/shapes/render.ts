@@ -318,8 +318,8 @@ export class ShapesRenderer {
     }
     ctx.restore();
 
-    drawLyrics(ctx, w, h, fx.lyrics, sim.position, {
-      font: 'Inter, system-ui, sans-serif', color: '255, 255, 255', alpha: 0.14, scale: 1 + 0.03 * this.pulse,
+    drawLyrics(ctx, w, h, fx, sim.position, {
+      font: 'Inter, system-ui, sans-serif', color: '255, 255, 255', scale: 1 + 0.03 * this.pulse,
     });
 
     // The background dims while the music rests, so the frozen hazards stand out

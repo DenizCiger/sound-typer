@@ -38,8 +38,10 @@ export interface EffectSettings {
   partColors: boolean;
   /** Draw the health at the player. */
   showHealth: boolean;
-  /** The song's timed lyrics to show behind the game, null for none. */
+  /** The song's timed lyrics, null if it has none. */
   lyrics: LyricLine[] | null;
+  /** How strongly the lyrics show behind the game, 0 (not at all) to 1. */
+  lyricsOpacity: number;
   /** Focus held: draw the hitbox brighter. */
   focus: boolean;
 }

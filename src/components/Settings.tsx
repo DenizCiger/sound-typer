@@ -18,8 +18,8 @@ export interface SettingsState {
   partColors: boolean;
   /** Game mode: health shown at the player. */
   showHealth: boolean;
-  /** Game mode: the line being sung behind the game, for songs with timed lyrics. */
-  showLyrics: boolean;
+  /** Game mode: how strongly the line being sung shows behind the game, 0 (off) to 1. */
+  lyricsOpacity: number;
   snapToWords: boolean;
   cursorPosition: 'bottom' | 'center';
   textWidth: TextWidth;
@@ -331,18 +331,16 @@ export function Settings({ settings, feel, noLyrics, onChange, onFeelChange, onR
             aria-label="Part colours"
           />
         </div>
-        <div className={styles.row}>
-          <div className={styles.labelGroup}>
-            <span className={styles.label}>Lyrics</span>
-            <span className={styles.hint}>{noLyrics ? 'This song has no timed lyrics' : 'Behind the game, if the song has timed lyrics'}</span>
-          </div>
-          <button
-            className={`${styles.toggle} ${settings.showLyrics ? styles.toggleOn : ''}`}
-            onClick={() => onChange({ ...settings, showLyrics: !settings.showLyrics })}
-            aria-pressed={settings.showLyrics}
-            aria-label="Lyrics"
-          />
-        </div>
+        <SliderRow
+          label="Lyrics opacity"
+          hint={noLyrics ? 'This song has no timed lyrics' : 'Behind the game, if the song has timed lyrics'}
+          min={0}
+          max={1}
+          step={0.05}
+          value={settings.lyricsOpacity}
+          format={(v) => (v === 0 ? 'Off' : formatPercent(v))}
+          onChange={(v) => onChange({ ...settings, lyricsOpacity: v })}
+        />
         </>}
 
         {!game && <>
